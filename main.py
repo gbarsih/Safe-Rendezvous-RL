@@ -8,6 +8,7 @@ import multiprocessing as mp
 import osmnx as ox
 import networkx as nx
 import matplotlib.pyplot as plt
+import math
 
 from animate import Animator
 import matplotlib
@@ -62,7 +63,7 @@ def getChampCountyMap(_filepath=None):
 
         _G = ox.add_edge_speeds(_G)
         _G = ox.add_edge_travel_times(_G)
-
+        _G = ox.bearing.add_edge_bearings(_G)
         return _G, _gdf, _gdf_water, _gdf_parks
 
     else:
@@ -75,7 +76,7 @@ def getChampCountyMap(_filepath=None):
         # hwy_speeds = {"residential": 35, "secondary": 50, "tertiary": 60}
         _G = ox.add_edge_speeds(_G)
         _G = ox.add_edge_travel_times(_G)
-
+        _G = ox.bearing.add_edge_bearings(_G)
         return _G, _gdf, _gdf_water, _gdf_parks
 
 
@@ -99,14 +100,42 @@ def getRouteData(G, route):
             xs, ys = data["geometry"].xy
             x.extend(xs)
             y.extend(ys)
-            speed.extend([a for a in zip(data.values())][-2][0]*np.ones(len(xs)))
+            speed.extend([a for a in data.values()][-3] * np.ones(len(xs)))
         else:
             # otherwise, the edge is a straight line from node to node
             x.extend((G.nodes[u]["x"], G.nodes[v]["x"]))
             y.extend((G.nodes[u]["y"], G.nodes[v]["y"]))
-            speed.extend([a for a in zip(data.values())][-2][0]*np.ones(1))
+            speed.extend([a for a in data.values()][-3] * np.ones(2))
+
+    lx = len(x)
+    ly = len(y)
+    ls = len(speed)
+
+    if lx!=ly | ls!=lx:
+        raise Exception("Something went wrong, route data doesnt have the same dimensions")
+
     return x, y, speed
- # TODO: fix size mismatch between x,y and speed
+
+def computeSpeedVec(G,route,vDev=None):
+    x,y,s = getRouteData(G, route)
+    s = s/3.6 #to m/s
+    plt.scatter(x,y); plt.show()
+    v = []
+    popi = []
+    for i in range(len(x)-1):
+        distance = [x[i + 1] - x[i], y[i + 1] - y[i]]
+        norm = math.sqrt(distance[0] ** 2 + distance[1] ** 2)
+        if norm == 0: #points on top of each other
+            popi.append(i)
+        else:
+            direction = [distance[0] / norm, distance[1] / norm]
+            v.append([direction[0] * s[i], direction[1] * s[i]])
+    x = np.delete(x,popi)
+    y = np.delete(y, popi)
+    s = np.delete(s, popi)
+    return x, y, s, v
+
+# TODO: fix size mismatch between x,y and speed
 
 # filepathuc = "./data/data.graphml"
 # G, gdf, gdf_water, gdf_parks = getUcMap()
