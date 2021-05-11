@@ -129,7 +129,7 @@ def getRouteData(G, route):
             y.extend((G.nodes[u]["y"], G.nodes[v]["y"]))
             s.extend([a for a in data.values()][-3] * np.ones(2))
             d.extend([a for a in data.values()][-4] * np.ones(2))
-            t.extend([a for a in data.values()][-2] * np.ones(2) / 2)
+            t.extend([a for a in data.values()][-2] * np.ones(1))
             # print(data)
             # print([a for a in data.values()][-2])
             # print(t)
@@ -148,44 +148,64 @@ def getRouteData(G, route):
 # a workable route object
 class iRoute:
 
-    def __init__(self, x, y, s, t, d, pos, global_t0, route):
-        self.x = x  # position
-        self.y = y
-        self.s = s  # speeds
-        # self.v = v  # calculated velocity
+    def __init__(self, G, orig, dest, p=0.0, t0=0.0, pos=0):
+        self.route = ox.shortest_path(G, orig, dest, weight="travel_time")
+        x, y, s, t, d = getRouteData(G, self.route)
+        # self.x = x  # position
+        # self.y = y
+        # self.s = s  # speeds
+        # # self.v = v  # calculated velocity
         self.t = t  # time for transition
         # self.n = n  # simulation steps to transition
-        self.d = d  # distance to cover
+        # self.d = d  # distance to cover
         self.pos = pos  # position (node index)
-        self.global_t0 = global_t0
-        self.edge_timer = 1
+        # self.gt0 = t0
+        self.edge_timer = 0.0
         self.local_time = 0.0
         self.dt = sim_env_dt
         # self.route_steps = sum(self.n)
-        self.lt = len(self.x)
+        self.lt = len(self.t)
         self.completed = False
-        self.route = route
+        self.nodes = [orig]
+        self.times = [t0]
+        self.p = p
+        self.orig = orig
+        self.dest = dest
 
     # this function progresses to the next node
-    def progress(self):
-        self.pos += 1  # advance one node
-        self.edge_timer = self.dt  # 1 if progressing to the next node is an action
+    def progress(self, G):
+
+        #check if there's a possibility of rerouting
+        if self.pos >= 0:
+            node_list, an = OneDegSep(G, self.route[self.pos], self.route[self.pos-1], self.route[self.pos+1])
+            if len(node_list) > 1 and np.random.uniform(0,1) < self.p:
+                # print("rerouting!!",node_list, self.pos)
+                self.route = reRoute(G, self.route[self.pos], node_list[np.random.randint(0,len(node_list))], self.dest)
+                x, y, s, t, d = computeIntervals(G, self.route, 0.0);
+                self.t = t  # time for transition
+                self.pos = 0
+                self.lt = len(self.t)
+            else:
+                self.pos += 1  # advance one node
+
+        self.nodes.append(self.route[self.pos])
+        self.times.append(self.local_time)
+        self.edge_timer = self.dt * 0.1  # 1 if progressing to the next node is an action
         return True
 
     # this function advances one time step
-    def step(self):
+    def step(self, G):
         self.edge_timer += self.dt
         self.local_time += self.dt
         stat = None
-        if self.edge_timer >= self.t[self.pos] and self.pos < self.lt and self.completed == False:
-            stat = self.progress()
-        elif self.pos == self.lt and self.completed == False:
+        if self.edge_timer >= self.t[self.pos] and self.pos < self.lt-1 and self.completed == False:
+            #print("Pos:", self.pos, "Travel Time:", self.t[self.pos], "Edge Time:", self.edge_timer, "Local Time:",
+            #      self.local_time)
+            stat = self.progress(G)
+        elif self.pos == self.lt-1 and self.completed == False:
             self.completed = True
-            print("At end of route, pos=", self.pos, "length of t=", self.lt, "Completed:",self.completed)
+            #print("At end of route, pos=", self.pos, "length of t=", self.lt, "Completed:", self.completed)
 
-
-        print("Pos:", self.pos, "Travel Time:", self.t[self.pos], "Edge Time:", self.edge_timer, "Local Time:",
-              self.local_time)
         return stat
 
     def printDeg(self, G):
@@ -193,45 +213,46 @@ class iRoute:
             print("Node deg:", G.nodes[self.route[self.pos]]["street_count"])
 
 
-
 def computeIntervals(G, route, vDev):
     x, y, s, t, d = getRouteData(G, route)
     s = np.array(s) / 3.6  # to m/s
-    # plt.scatter(x, y)
-    # plt.show()
-    v = []
-    n = []
-    popi = []
-    for i in range(len(x) - 1):
-        distance = [x[i + 1] - x[i], y[i + 1] - y[i]]
-        norm = math.sqrt(distance[0] ** 2 + distance[1] ** 2)
-        if norm == 0:  # points on top of each other
-            popi.append(i)
-        # else:
-        #     # faster drivers spend less time at any given stretch
-        #     td = t[i]
-        #     # if vDev is None:
-        #     #     td += vDev(td)
-        #
-        #     steps = td / sim_env_dt
-        #     steps_rounded = int(round(steps, 1))
-        #     # print("Time in segment:", td, "Number of steps:", steps, "Rounded:", steps_rounded)
-        #     n.append(int(np.maximum(0, steps_rounded)))
-        #     direction = [distance[0] / norm, distance[1] / norm]  # normalized direction
-        #     v.append([direction[0] * s[i], direction[1] * s[i]])
-    x = np.delete(x, popi)
-    y = np.delete(y, popi)
-    s = np.delete(s, popi)
+    # # plt.scatter(x, y)
+    # # plt.show()
+    # v = []
+    # n = []
+    # popi = []
+    # for i in range(len(x) - 1):
+    #     distance = [x[i + 1] - x[i], y[i + 1] - y[i]]
+    #     norm = math.sqrt(distance[0] ** 2 + distance[1] ** 2)
+    #     if norm == 0:  # points on top of each other
+    #         popi.append(i)
+    #     # else:
+    #     #     # faster drivers spend less time at any given stretch
+    #     #     td = t[i]
+    #     #     # if vDev is None:
+    #     #     #     td += vDev(td)
+    #     #
+    #     #     steps = td / sim_env_dt
+    #     #     steps_rounded = int(round(steps, 1))
+    #     #     # print("Time in segment:", td, "Number of steps:", steps, "Rounded:", steps_rounded)
+    #     #     n.append(int(np.maximum(0, steps_rounded)))
+    #     #     direction = [distance[0] / norm, distance[1] / norm]  # normalized direction
+    #     #     v.append([direction[0] * s[i], direction[1] * s[i]])
+    # x = np.delete(x, popi)
+    # y = np.delete(y, popi)
+    # s = np.delete(s, popi)
 
     return x, y, s, t, d
 
-def scatterGraph(node_list,G: nx.classes.multidigraph.MultiDiGraph, ax,color='green'):
+
+def scatterGraph(node_list, G: nx.classes.multidigraph.MultiDiGraph, ax, color='green'):
     for i in range(len(node_list)):
-        ax.scatter(G.nodes[node_list[i]]['x'],G.nodes[node_list[i]]['y'],c=color,s=10)
+        ax.scatter(G.nodes[node_list[i]]['x'], G.nodes[node_list[i]]['y'], c=color, s=10)
 
     return ax
 
-def OneDegSep(G: nx.classes.multidigraph.MultiDiGraph, node, prev_node = None, next_node = None):
+
+def OneDegSep(G: nx.classes.multidigraph.MultiDiGraph, node, prev_node=None, next_node=None):
     an = nx.generators.ego_graph(G, node)
     node_list = list(an.nodes)
     node_list.remove(node)
@@ -239,26 +260,57 @@ def OneDegSep(G: nx.classes.multidigraph.MultiDiGraph, node, prev_node = None, n
         try:
             node_list.remove(prev_node)
         except Exception as ex:
-            print("prev node unreachable")
+            node_list
 
     if next_node is not None:
         node_list.remove(next_node)
 
     return node_list, an
 
-def reRoute(G,prev_node,curr_node,dest):
-    #Finds a new route that doesn't go through any of the past nodes as defined in argin
+
+def reRoute(G, prev_node, curr_node, dest):
+    # Finds a new route that doesn't go through any of the past nodes as defined in argin
 
     try:
         temp = G[curr_node][prev_node][0]['travel_time']
         G[curr_node][prev_node][0]['travel_time'] = 1e6
-        newRoute = ox.shortest_path(G,curr_node,dest,weight="travel_time")
+        newRoute = ox.shortest_path(G, curr_node, dest, weight="travel_time")
         G[curr_node][prev_node][0]['travel_time'] = temp
     except Exception as ex:
         print("street is one-way, no weight assgntm")
-        newRoute = ox.shortest_path(G,curr_node,dest,weight="travel_time")
+        newRoute = ox.shortest_path(G, curr_node, dest, weight="travel_time")
 
     return newRoute
 
+def iRouteIterator(routes,G):
+    for i in range(len(routes)):
+        # print("stepping route", i)
+        routes[i].step(G)
 
+    return routes
+
+def compRoute(r,G):
+    i = 0
+    while not r.completed and i < 1e10:
+        i += 1
+        r.step(G)
+        # r.printDeg(G)
+
+def CheckCompletion(r, verbose=False):
+    comp = []
+    for x in r:
+        if verbose:
+            print(x.completed)
+        comp.append(x.completed)
+
+    return all(comp)
+
+def GatherRoutes(r):
+    nodes = []
+    times = []
+    for x in r:
+        nodes.append(x.nodes)
+        times.append(x.times)
+
+    return nodes, times
 

@@ -32,7 +32,7 @@ EARTH_RADIUS_M = 6_371_009
 # G, gdf, gdf_water, gdf_parks = utils.getUCMap()
 places = ['Champaign, Illinois, USA', 'Urbana, Illinois, USA']
 # places = 'Chicago, Illinois, USA'
-G = ox.graph_from_place(places, network_type="drive",simplify=False)
+G = ox.graph_from_place(places, network_type="drive", simplify=False)
 G = ox.add_edge_speeds(G)
 G = ox.add_edge_travel_times(G)
 G = ox.bearing.add_edge_bearings(G)
@@ -70,25 +70,24 @@ fig, ax = ox.plot_graph_routes(
 
 plt.show()
 
-route = ox.k_shortest_paths(G,orig[5],dest[5],5,weight="length")
+route = ox.k_shortest_paths(G, orig[5], dest[5], 5, weight="length")
 route = list(route)
 
 fig, ax = ox.plot_graph(G, node_size=1, node_color="#a3a3a3", edge_color="#a3a3a3", edge_linewidth=0.5,
-                        bgcolor="#ffffff", show=False, dpi = 3000,figsize=(20,20))
+                        bgcolor="#ffffff", show=False, dpi=3000, figsize=(20, 20))
 
 fig, ax = ox.plot_graph_routes(
     G, ax=ax, routes=route, route_colors=ox.plot.get_colors(len(route)), route_linewidth=3, node_size=0,
-    close=False, show=False, dpi = 1000,figsize=(20,20)
-); plt.show()
-
-
+    close=False, show=False, dpi=1000, figsize=(20, 20)
+);
+plt.show()
 
 places = ['Champaign, Illinois, USA', 'Urbana, Illinois, USA']
-places = 'Chicago, Illinois, USA'       # orig[0]
-                                        # Out[177]: 5891694350
-                                        # dest[0]
-                                        # Out[178]: 2844260418
-G = ox.graph_from_place(places, network_type="drive",simplify=False)
+# places = 'Chicago, Illinois, USA'       # orig[0]
+#                                         # Out[177]: 5891694350
+#                                         # dest[0]
+#                                         # Out[178]: 2844260418
+G = ox.graph_from_place(places, network_type="drive", simplify=False)
 G = ox.add_edge_speeds(G)
 G = ox.add_edge_travel_times(G)
 G = ox.bearing.add_edge_bearings(G)
@@ -100,50 +99,70 @@ dest = random.sample(list(G), nroutes)
 
 route1 = ox.shortest_path(G, orig[0], dest[0], weight="travel_time")
 im.reload(utils)
-x, y, s, t, d = utils.computeIntervals(G, route1, 0.0);
-r = utils.iRoute(x, y, s, t, d, 0, 0, route1)
+r = utils.iRoute(G, orig[0], dest[0], 0.2)
+utils.compRoute(r, G)
+routes = []
+
+for i in range(100):
+    try:
+        routes.append(utils.iRoute(G, orig[0], dest[0], 0.1))
+    except Exception as ex:
+        print(ex)
+
+looping = True
 
 i = 0
-
-while not r.completed and i < 100000:
-    print(r.completed)
+while not utils.CheckCompletion(routes) and i < 1e6:
     i += 1
-    r.step()
-    r.printDeg(G)
+    # print(i)
+    utils.iRouteIterator(routes, G)
 
+print(utils.CheckCompletion(routes))
 
-print(r.local_time)
+nodes, times = utils.GatherRoutes(routes)
 
+y = G.nodes[route1[200]]["y"]
+x = G.nodes[route1[200]]["x"]
+
+bbox = ox.utils_geo.bbox_from_point((y,x), dist=5000)
+
+fig, ax = ox.plot_graph(G, node_size=1, node_color="#a3a3a3", edge_color="#a3a3a3", edge_linewidth=0.5,
+                        bgcolor="#ffffff", show=False, dpi=600, figsize=(20, 20), bbox=bbox)
+
+fig, ax = ox.plot_graph_routes(
+    G, ax=ax, routes=nodes, route_colors='r', route_linewidth=3, node_size=0,
+    route_alpha=0.1,
+    close=False, show=False, dpi=600, figsize=(20, 20), bbox=bbox, save=True, filepath='images/route_distr.png'
+);
+plt.show()
 
 im.reload(utils)
-
 node_list = []
 
-for idx in range(100,len(route1)-1):
-    node_list, an = utils.OneDegSep(G, route1[idx], route1[idx - 1], route1[idx+1])
+for idx in range(100, len(route1) - 1):
+    node_list, an = utils.OneDegSep(G, route1[idx], route1[idx - 1], route1[idx + 1])
     if len(node_list) > 1: break
 
+newRoute = utils.reRoute(G, route1[idx], node_list[0], dest[0])
+newAlt = utils.reRoute(G, route1[idx], node_list[1], dest[0])
 
-newRoute = utils.reRoute(G,route1[idx],node_list[0],dest[0])
-newAlt = utils.reRoute(G,route1[idx],node_list[1],dest[0])
-
-for idxn in range(5,len(newRoute)-1):
-    node_listn, ann = utils.OneDegSep(G, newRoute[idxn], newRoute[idxn - 1], newRoute[idxn+1])
+for idxn in range(5, len(newRoute) - 1):
+    node_listn, ann = utils.OneDegSep(G, newRoute[idxn], newRoute[idxn - 1], newRoute[idxn + 1])
     if len(node_listn) > 1: break
 
-newNewRoute = utils.reRoute(G,newRoute[idxn],node_listn[0],dest[0])
+newNewRoute = utils.reRoute(G, newRoute[idxn], node_listn[0], dest[0])
 routes = [route1, newRoute, newAlt, newNewRoute]
 
 bbox = ox.utils_geo.bbox_from_point((G.nodes[newRoute[0]]['y'], G.nodes[newRoute[0]]['x']), dist=500)
 
 fig, ax = ox.plot_graph(G, node_size=50, node_color="#a3a3a3", edge_color="#a3a3a3", edge_linewidth=2,
-                        bgcolor="#ffffff", show=False, dpi = 600,figsize=(20,20), bbox=bbox);
+                        bgcolor="#ffffff", show=False, dpi=600, figsize=(20, 20), bbox=bbox);
 
 fig, ax = ox.plot_graph_routes(
     G, ax=ax, routes=routes, route_colors=ox.plot.get_colors(len(routes)), route_linewidth=10,
     close=False, show=False, save=True, filepath='images/reroute_consequences.png');
-ax = utils.scatterGraph(node_list,G,ax)
-ax.scatter(G.nodes[route1[idx]]['x'],G.nodes[route1[idx]]['y'],c='red',s=30)
-ax.scatter(G.nodes[route1[idx+1]]['x'],G.nodes[route1[idx+1]]['y'],c='blue',s=30)
+ax = utils.scatterGraph(node_list, G, ax)
+ax.scatter(G.nodes[route1[idx]]['x'], G.nodes[route1[idx]]['y'], c='red', s=30)
+ax.scatter(G.nodes[route1[idx + 1]]['x'], G.nodes[route1[idx + 1]]['y'], c='blue', s=30)
 
 plt.show()
