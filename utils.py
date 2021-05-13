@@ -4,6 +4,10 @@ import networkx as nx
 import matplotlib.pyplot as plt
 import math
 import geopy.distance as gd
+import random
+from multiprocessing import Pool as ThreadPool
+import itertools
+
 
 coords_1 = (52.2296756, 21.0122287)
 coords_2 = (52.406374, 16.9251681)
@@ -168,6 +172,7 @@ class iRoute:
         self.completed = False
         self.nodes = [orig]
         self.times = [t0]
+        self.t_0 = t0
         self.p = p
         self.orig = orig
         self.dest = dest
@@ -189,7 +194,7 @@ class iRoute:
                 self.pos += 1  # advance one node
 
         self.nodes.append(self.route[self.pos])
-        self.times.append(self.local_time)
+        self.times.append(self.local_time + self.t_0)
         self.edge_timer = self.dt * 0.1  # 1 if progressing to the next node is an action
         return True
 
@@ -296,6 +301,8 @@ def compRoute(r,G):
         r.step(G)
         # r.printDeg(G)
 
+    return r
+
 def CheckCompletion(r, verbose=False):
     comp = []
     for x in r:
@@ -313,4 +320,84 @@ def GatherRoutes(r):
         times.append(x.times)
 
     return nodes, times
+
+def nDetourOpportunities(r,G):
+    l = len(r)
+    d = 0
+    for i in range(1,l-1):
+        node_list, an = OneDegSep(G,r[i],r[i-1],r[i+1])
+        if len(node_list) > 1:
+            d += 1
+
+
+    return d
+
+def clip(x, l, u):
+    return l if x < l else u if x > u else x
+
+def routeTotalDetourProbality(G,orig,dest,Edetours,t_0=0.0):
+    nom_route = ox.shortest_path(G, orig, dest, weight='travel_time')
+    d = nDetourOpportunities(nom_route, G)
+    if d > 2:
+        # E[detours] = p*d -> p = Edetours/d
+        p = Edetours/d
+        p = clip(p, 0, 1)
+    else:
+        p = 0.0
+
+    return iRoute(G,orig,dest,p,t_0)
+
+def createDataSetPar(G,nroutes=100,Edetours=1):
+    pool = ThreadPool(63)
+    orig = random.sample(list(G), nroutes)
+    dest = random.sample(list(G), nroutes)
+    t_0 = 0.0
+
+    routes = pool.starmap(createRoute, zip(itertools.repeat(G), orig, dest, itertools.repeat(Edetours), itertools.repeat(t_0)))
+    routes = [i for i in routes if i]
+    nroutes = len(routes)
+    results = pool.starmap(compRoute, zip(routes, itertools.repeat(G)))
+    pool.close()
+    return results
+
+def createDataSetSingle(G,nroutes=100,Edetours=1):
+    orig = random.sample(list(G), nroutes)
+    dest = random.sample(list(G), nroutes)
+    t_0 = 0.0
+    routes = []
+    for i in range(nroutes):
+        try:
+            routes.append(routeTotalDetourProbality(G,orig[i],dest[i],Edetours,t_0))
+        except Exception as ex:
+            print(ex)
+
+
+    nroutes = len(routes)
+
+    for i in range(nroutes):
+        compRoute(routes[i],G)
+
+
+    return routes
+
+def createRoute(G,orig,dest,Edetours,t_0):
+    try:
+        return routeTotalDetourProbality(G, orig, dest, Edetours, t_0)
+    except Exception as ex:
+        print(ex)
+
+def plotRoutes(routes,nroutes,G,color='r',save=False,filepath='images/routes.png'):
+    routes = routes[0:nroutes-1]
+    fig, ax = ox.plot_graph(G, node_size=1, node_color="#a3a3a3", edge_color="#a3a3a3", edge_linewidth=0.5,
+                            bgcolor="#ffffff", show=False, dpi=600, figsize=(20, 20))
+
+    ox.plot_graph_routes(
+        G, ax=ax, routes=routes, route_colors=color, route_linewidth=3, node_size=0,
+        route_alpha=0.1,
+        close=False, show=False, dpi=600, figsize=(20, 20), save=save, filepath=filepath
+    );
+    plt.show()
+
+
+
 

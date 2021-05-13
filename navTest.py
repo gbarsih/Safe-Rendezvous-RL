@@ -15,6 +15,7 @@ import networkx as nx
 import importlib as im
 import utils
 import random
+import time
 
 im.reload(utils)
 
@@ -44,7 +45,7 @@ bbox = (40.1213, 40.0996, -88.1981, -88.2455)
 routex = np.random.uniform(low=bbox[0], high=bbox[1], size=2)
 routey = np.random.uniform(low=bbox[2], high=bbox[3], size=2)
 
-nroutes = 30
+nroutes = 10
 
 orig = random.sample(list(G), nroutes)
 dest = random.sample(list(G), nroutes)
@@ -60,12 +61,12 @@ for i in range(len(orig)):
 # fig, ax = ox.plot_footprints(gdf, alpha=0.5, show=False, close=False, bgcolor="#ffffff")
 # fig, ax = ox.plot_footprints(gdf_parks, ax=ax, alpha=0.5, color="green", show=False, bgcolor="#ffffff")
 # fig, ax = ox.plot_footprints(gdf_water, ax=ax, alpha=0.5, color="blue", show=False, bgcolor="#ffffff")
-fig, ax = ox.plot_graph(G, node_size=1, node_color="#a3a3a3", edge_color="#a3a3a3", edge_linewidth=0.5,
-                        bgcolor="#ffffff", show=False)
+fig, ax = ox.plot_graph(G, node_size=3, node_color="#a3a3a3", edge_color="#a3a3a3", edge_linewidth=1.0,
+                        bgcolor="#ffffff", show=False, dpi=600, figsize=(20,20))
 
 fig, ax = ox.plot_graph_routes(
-    G, ax=ax, routes=route, route_colors=ox.plot.get_colors(len(route)), route_linewidth=3, node_size=0, save=True,
-    dpi=600, close=False, show=False
+    G, ax=ax, routes=route, route_colors=ox.plot.get_colors(len(route)), route_linewidth=5, node_size=0, save=True,
+    close=False, show=False, filepath='images/route_examples.png'
 )
 
 plt.show()
@@ -99,13 +100,13 @@ dest = random.sample(list(G), nroutes)
 
 route1 = ox.shortest_path(G, orig[0], dest[0], weight="travel_time")
 im.reload(utils)
-r = utils.iRoute(G, orig[0], dest[0], 0.2)
+r = utils.iRoute(G, orig[0], dest[0], 0.0)
 utils.compRoute(r, G)
 routes = []
 
 for i in range(100):
     try:
-        routes.append(utils.iRoute(G, orig[0], dest[0], 0.1))
+        routes.append(utils.iRoute(G, orig[0], dest[0], 0.01))
     except Exception as ex:
         print(ex)
 
@@ -121,8 +122,10 @@ print(utils.CheckCompletion(routes))
 
 nodes, times = utils.GatherRoutes(routes)
 
-y = G.nodes[route1[200]]["y"]
-x = G.nodes[route1[200]]["x"]
+pos = int(len(route1)/2)
+
+y = G.nodes[route1[pos]]["y"]
+x = G.nodes[route1[pos]]["x"]
 
 bbox = ox.utils_geo.bbox_from_point((y,x), dist=5000)
 
@@ -166,3 +169,22 @@ ax.scatter(G.nodes[route1[idx]]['x'], G.nodes[route1[idx]]['y'], c='red', s=30)
 ax.scatter(G.nodes[route1[idx + 1]]['x'], G.nodes[route1[idx + 1]]['y'], c='blue', s=30)
 
 plt.show()
+
+
+
+## Dataset Creation
+
+gdf_nodes, gdf_edges = ox.graph_to_gdfs(G)
+
+center_lat = np.mean(gdf_nodes.y.values)
+center_lon = np.mean(gdf_nodes.x.values)
+center = (center_lat, center_lon)
+
+im.reload(utils)
+nroutes = 200
+routes = utils.createDataSetPar(G,nroutes,1)
+nodes, times = utils.GatherRoutes(routes)
+utils.plotRoutes(nodes,len(nodes),G)
+
+
+
