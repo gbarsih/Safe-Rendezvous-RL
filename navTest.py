@@ -16,6 +16,8 @@ import importlib as im
 import utils
 import random
 import time
+import itertools
+import pickle
 
 im.reload(utils)
 
@@ -93,6 +95,7 @@ G = ox.add_edge_speeds(G)
 G = ox.add_edge_travel_times(G)
 G = ox.bearing.add_edge_bearings(G)
 
+
 nroutes = 30
 
 orig = random.sample(list(G), nroutes)
@@ -100,7 +103,7 @@ dest = random.sample(list(G), nroutes)
 
 route1 = ox.shortest_path(G, orig[0], dest[0], weight="travel_time")
 im.reload(utils)
-r = utils.iRoute(G, orig[0], dest[0], 0.0)
+r = utils.iRoute(G, orig[0], dest[0], 0.1)
 utils.compRoute(r, G)
 routes = []
 
@@ -181,10 +184,58 @@ center_lon = np.mean(gdf_nodes.x.values)
 center = (center_lat, center_lon)
 
 im.reload(utils)
-nroutes = 200
+nroutes = 10
 routes = utils.createDataSetPar(G,nroutes,1)
 nodes, times = utils.GatherRoutes(routes)
-utils.plotRoutes(nodes,len(nodes),G)
+
+im.reload(utils)
+optnodes, opttimes, E, idxs, risk = utils.computeCompositeRisk(routes, G)
+optnodes = []
+for i in range(len(idxs)):
+    optnodes.append(nodes[i][idxs[i]])
+
+
+# fig, ax = utils.plotRoutes(nodes,len(nodes),G)
+# ax = utils.scatterGraph(optnodes, G, ax, 'blue')
+# plt.show()
+
+depot_node = ox.get_nearest_nodes(G,[utils.depot[1]],[utils.depot[0]])
+
+fig, ax = ox.plot_graph(G, node_size=1, node_color="#a3a3a3", edge_color="#a3a3a3", edge_linewidth=0.5,
+                        bgcolor="#ffffff", show=False, dpi=600, figsize=(20, 20));
+
+fig, ax = ox.plot_graph_routes(
+    G, ax=ax, routes=nodes, route_colors='r', route_linewidth=3, route_alpha=0.1, node_size=0,
+    close=False, show=False);
+ax = utils.scatterGraph(optnodes, G, ax)
+ax = utils.scatterGraph(depot_node, G, ax, color='blue')
+ax = utils.scatterGraph([routes[0].orig], G, ax, color='blue')
+plt.show()
+
+results = utils.fastBigData(G, 100, 50, 1, 64)
+with open('res.pkl', 'wb') as f:
+    pickle.dump(results, f)
+
+
+with open('res.pkl', 'rb') as f:
+    res_pkl = pickle.load(f)
+
+routes, risks = zip(*res_pkl)
+
+oxp = []
+oyp = []
+dxp = []
+dyp = []
+rrv = []
+
+for i in range(len(risks)):
+    o = routes[i][0].orig
+    d = routes[i][0].dest
+    oxp.append(G.nodes[o]['x'])
+    oyp.append(G.nodes[o]['y'])
+    dxp.append(G.nodes[d]['x'])
+    dyp.append(G.nodes[d]['y'])
+    rrv.append(risks[i])
 
 
 
