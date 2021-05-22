@@ -442,7 +442,12 @@ def routeRiskSingle(G, o, d, Edetours, t_0, nroutes):
     invalid = False
     for i in range(nroutes):
         try:
-            routes.append(routeTotalDetourProbality(G, o, d, Edetours, t_0))
+            if i == 0:
+                Edetours_l = 0.0
+            else:
+                Edetours_l = Edetours
+
+            routes.append(routeTotalDetourProbality(G, o, d, Edetours_l, t_0))
         except Exception as ex:
             print(ex)
             print("Skipping this dest/orig pair")
@@ -461,7 +466,8 @@ def routeRiskSingle(G, o, d, Edetours, t_0, nroutes):
         elapsed = end - start
         print(datetime.datetime.now(), "Finished batch of risk computation in", elapsed)
 
-    routes = [routes[0]]
+    if len(routes) > 0:
+        routes = [routes[0]]
 
     return routes, risk
 
@@ -533,7 +539,7 @@ def plotRoutes(routes, nroutes, G, color='r', save=False, filepath='images/route
 def costFun(d, t):
     alpha = 1
     t = np.maximum(t, 0.1)
-    return 1 / 2 * d**2 *t + alpha * t
+    return 1 / 2 * d ** 2 * t + alpha * t
     # return d
 
 
@@ -628,9 +634,11 @@ def merge(list1, list2):
     merged_list = [(list1[i], list2[i]) for i in range(0, len(list1))]
     return merged_list
 
-def merge4(list1,list2,list3,list4):
+
+def merge4(list1, list2, list3, list4):
     merged_list = [(list1[i], list2[i], list3[i], list4[i]) for i in range(0, len(list1))]
     return merged_list
+
 
 def mapRange(value, leftMin, leftMax, rightMin, rightMax):
     # Figure out how 'wide' each range is
@@ -642,3 +650,34 @@ def mapRange(value, leftMin, leftMax, rightMin, rightMax):
 
     # Convert the 0-1 range into a value in the right range.
     return rightMin + (valueScaled * rightSpan)
+
+
+def collectDataCriteria(route, risk, G, d_threshold, r_threshold):
+    o = route[0].orig
+    d = route[0].dest
+    r = route[0].optNode
+    dist = gd.distance((G.nodes[r]['y'], G.nodes[r]['x']), depot).m
+    if len(route) > 0 and r_threshold > risk > 0.0 and dist > d_threshold:
+        oxp = G.nodes[o]['x']
+        oyp = G.nodes[o]['y']
+        dxp = G.nodes[d]['x']
+        dyp = G.nodes[d]['y']
+
+        rp = r
+        rxp = G.nodes[r]['x']
+        ryp = G.nodes[r]['y']
+
+        rrv = risk
+        return oxp, oyp, dxp, dyp, rrv, rp, rxp, ryp
+
+
+def collectDataMP(routes, risks, G, data_size, d_threshold, r_threshold, pool_size=cpus):
+    pool_size = np.minimum(pool_size, cpus)
+    pool = ThreadPool(pool_size)
+    results = pool.starmap(collectDataCriteria, zip(routes, risks, itertools.repeat(G), itertools.repeat(d_threshold),
+                                                    itertools.repeat(r_threshold)))
+
+    pool.close()
+
+    return results
+
