@@ -1,15 +1,25 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torchviz import make_dot
 from torch.utils.data import DataLoader
 import numpy as np
 # from mpl_toolkits import mplot3d
 from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.pyplot as plt
+import matplotlib as mpl
 import geopy.distance as gd
 import re
+import seaborn as sns;
+
+sns.set_theme()
+sns.set_style("whitegrid")
+sns.set_context("talk")
+sns.color_palette("tab10")
+sns.color_palette("crest", as_cmap=True)
 
 import osmnx as ox
+import networkx as nx
 import importlib as im
 import utils
 # import random
@@ -23,9 +33,9 @@ import pandas as pd
 im.reload(utils)
 
 if torch.cuda.is_available():
-  dev = "cuda:0"
+    dev = "cuda:0"
 else:
-  dev = "cpu"
+    dev = "cpu"
 
 device = torch.device(dev)
 
@@ -35,25 +45,28 @@ device = torch.device(dev)
 #   print("Name of the Cuda Device: ", torch.cuda.get_device_name())
 #   print("GPU Computational Capablity: ", torch.cuda.get_device_capability())
 
-places = ['Champaign, Illinois, USA', 'Urbana, Illinois, USA']
-# places = 'Chicago, Illinois, USA'       # orig[0]
-#                                         # Out[177]: 5891694350
-#                                         # dest[0]
-#                                         # Out[178]: 2844260418
-G = ox.graph_from_place(places, network_type="drive", simplify=False)
-G = ox.add_edge_speeds(G)
-G = ox.add_edge_travel_times(G)
-G = ox.bearing.add_edge_bearings(G)
-G = ox.utils_graph.get_largest_component(G, strongly=True)
+# places = ['Champaign, Illinois, USA', 'Urbana, Illinois, USA']
+# # places = 'Chicago, Illinois, USA'       # orig[0]
+# #                                         # Out[177]: 5891694350
+# #                                         # dest[0]
+# #                                         # Out[178]: 2844260418
+# G = ox.graph_from_place(places, network_type="drive", simplify=False)
+# G = ox.add_edge_speeds(G)
+# G = ox.add_edge_travel_times(G)
+# G = ox.bearing.add_edge_bearings(G)
+# G = ox.utils_graph.get_largest_component(G, strongly=True)
+#
+# with open('CU_graph.pkl', 'wb') as f:
+#     pickle.dump(G, f)
 
-with open('CU_graph.pkl', 'wb') as f:
-    pickle.dump(G, f)
+with open('CU_graph.pkl', 'rb') as f:
+    G = pickle.load(f)
 
 directory = '/data/risk_datasets/mixed_data_old_no_dev/'
-directory = 'datasets_no_detours/'
+directory = 'datasets_max5risk/'
 filename = 'res'
 file = directory + filename
-onlyfiles = [f for f in listdir(directory) if isfile(join(directory, f))]
+onlyfiles = [f for f in listdir(directory) if isfile(join(directory, f)) and f[0] is not 'C']
 
 routes = []
 risks = []
@@ -88,7 +101,7 @@ ryp = []
 
 risks_treated = [risks[i] for i in range(data_size) if risks[i] < 1e9]
 threshold = np.mean(risks_treated)
-r_threshold = 1e7 /2
+r_threshold = 1e7 / 2
 d_threshold = 500
 
 for i in range(data_size):
@@ -109,9 +122,8 @@ for i in range(data_size):
         rrv.append(risks[i])
         rrc.append(risks[i])
 
-
 ur = 1.0
-lr = 0.0
+lr = -0.0
 
 ubx = np.maximum(np.max(oxp), np.max(dxp))
 lbx = np.minimum(np.min(oxp), np.min(dxp))
@@ -126,6 +138,8 @@ dyp = [utils.mapRange(x, lby, uby, lr, ur) for x in dyp]
 rrv = [utils.mapRange(x, lbr, ubr, lr, ur) for x in rrv]
 rxp = [utils.mapRange(x, lbx, ubx, lr, ur) for x in rxp]
 ryp = [utils.mapRange(x, lby, uby, lr, ur) for x in ryp]
+
+coord_bounds = {'ubx': ubx, 'lbx': lbx, 'uby': uby, 'lby': lby, 'ur': ur, 'lr': lr}
 
 df = pd.DataFrame(list(zip(oxp, oyp, dxp, dyp, rrv)),
                   columns=['X_origin', 'Y_origin', 'X_destination', 'Y_destination', 'risk'])
@@ -142,16 +156,17 @@ inp_stack = torch.tensor(df[Inputs].values, dtype=torch.float64)
 out_stack = torch.tensor(df[Outputs].values, dtype=torch.float32)
 
 total_data_entries = len(r)
-test_data = int(total_data_entries * .2)
+test_data = int(total_data_entries * .01)
 
-train_inputs = inp_stack[:total_data_entries-test_data].to(device=device)
-train_outputs = out_stack[:total_data_entries-test_data].to(device=device)
+train_inputs = inp_stack[:total_data_entries - test_data].to(device=device)
+train_outputs = out_stack[:total_data_entries - test_data].to(device=device)
 
-test_inputs = inp_stack[total_data_entries-test_data:total_data_entries].to(device=device)
-test_outputs = out_stack[total_data_entries-test_data:total_data_entries].to(device=device)
+test_inputs = inp_stack[total_data_entries - test_data:total_data_entries].to(device=device)
+test_outputs = out_stack[total_data_entries - test_data:total_data_entries].to(device=device)
 
-rxpt = rxp[total_data_entries-test_data:total_data_entries]
-rypt = ryp[total_data_entries-test_data:total_data_entries]
+rxpt = rxp[total_data_entries - test_data:total_data_entries]
+rypt = ryp[total_data_entries - test_data:total_data_entries]
+
 
 class Model(nn.Module):
 
@@ -175,19 +190,29 @@ class Model(nn.Module):
         x = self.layers(inputs)
         return x
 
+
 layers = []
-for i in range(5):
+for i in range(10):
     layers.append(512)
 
-model = Model(4, 1, layers, p=0.4)
+model = Model(4, 1, layers, p=0.7)
 model = nn.DataParallel(model)
 model.to(device)
-epochs = 5000
-num_stints = 100
+epochs = 10000
+num_stints = 1
 aggregated_losses = []
 
 loss_function = nn.MSELoss().to(device=device)
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+
+# checkpoint = torch.load('checkpoints/mdl_no_detours_5_512.pth')
+# model.load_state_dict(checkpoint['model_state_dict'])
+# optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+# epoch = checkpoint['epoch']
+# loss_function = checkpoint['loss']
+# model.to(device)
+#
+# model.eval()
 
 model.train()
 for k in range(num_stints):
@@ -198,7 +223,7 @@ for k in range(num_stints):
         single_loss = loss_function(y_pred, train_outputs)
         aggregated_losses.append(single_loss)
 
-        if i%25 == 1:
+        if i % 25 == 1:
             print(f'epoch: {i:3} loss: {single_loss.item():10.8f}')
 
         optimizer.zero_grad()
@@ -215,14 +240,17 @@ for k in range(num_stints):
 
 print(f'epoch: {i:3} loss: {single_loss.item():10.10f}')
 
-fig = plt.figure(figsize=(10, 10), dpi=100)
-plt.plot(aggregated_losses, label="Training Loss", linewidth = 3)
+fig = plt.figure(figsize=(15, 15), dpi=100)
+plt.plot(aggregated_losses, label="Training Loss", linewidth=3)
+plt.xlabel('Epoch')
+plt.ylabel('Training Loss')
+plt.title(directory)
 plt.show()
 
 with torch.no_grad():
     model.eval()
     predictions = model(test_inputs.float())
-    single_loss = loss_function(predictions, test_outputs)
+    # single_loss = loss_function(predictions, test_outputs)
 
 predictions = predictions.cpu().numpy()
 reals = test_outputs.cpu().numpy()
@@ -231,8 +259,7 @@ test_size = 10
 
 for i in range(test_size):
     pred = predictions[i]
-    print(pred, reals[i], np.abs(pred-reals[i]))
-
+    print(pred, reals[i], np.abs(pred - reals[i]))
 
 idxs = [i for i in range(len(reals)) if reals[i] > 0]
 rrvp = [reals[i] for i in idxs]
@@ -241,8 +268,8 @@ rypp = [rypt[i] for i in idxs]
 
 preds = [np.abs(predictions[i][0]) for i in range(len(rrvp))]
 perf = [np.abs(predictions[i][0] - rrvp[i]) for i in range(len(rrvp))]
-perf_pct = [predictions[i][0]/rrvp[i] for i in range(len(rrvp))]
-perf_mse = [(predictions[i][0] - rrvp[i])**2 for i in range(len(rrvp))]
+perf_pct = [predictions[i][0] / rrvp[i] for i in range(len(rrvp))]
+perf_mse = [(predictions[i][0] - rrvp[i]) ** 2 for i in range(len(rrvp))]
 
 pu = np.max(perf)
 pl = np.min(perf)
@@ -250,16 +277,98 @@ pl = np.min(perf)
 perfp = [utils.mapRange(x, pl, pu, lr, ur) for x in perf]
 perf_mse = np.mean(perf_mse)
 
-# fig = plt.figure(figsize=(15, 15), dpi=100)
-# ax = Axes3D(fig)
-# ax.scatter(rxpp, rypp, rrvp, marker='o', s=10, c='red', alpha=0.01)
-# ax.scatter(rxpp, rypp, preds, marker='o', s=10, c=preds, alpha=0.03)
-# ax.view_init(elev=00., azim=270)
-# ax.set_xlabel('$X$')
-# ax.set_ylabel('$Y$')
-# ax.set_zlabel('$Z$')
-# plt.show()
-#
+fig = plt.figure(figsize=(15, 15), dpi=100)
+ax = Axes3D(fig)
+ax.scatter(rxpp, rypp, rrvp, marker='o', s=10, c='blue', alpha=0.1)
+ax.scatter(rxpp, rypp, preds, marker='o', s=10, c='red', alpha=0.1)
+ax.view_init(elev=00., azim=270)
+ax.set_zlim(lr, ur)
+ax.set_xlabel('$X$')
+ax.set_ylabel('$Y$')
+ax.set_zlabel('$Risk$')
+ax.set_title(directory)
+plt.show()
+
 print(np.median(perf))
 print(perf_mse)
 print(np.max(np.abs(perf)))
+
+## plot a heatmap of risks
+im.reload(utils)
+fig = plt.figure(figsize=(15, 15), dpi=100)
+fig.suptitle(directory)
+ax221 = fig.add_subplot(221)
+ax222 = fig.add_subplot(222)
+ax223 = fig.add_subplot(223)
+ax224 = fig.add_subplot(224)
+c = None
+rp = ur
+rm = lr
+vmin = lr
+vmax = ur
+predictions = utils.TwoDPredictions(model, rm, rp, device)
+sns.heatmap(predictions, square=True, xticklabels=False, yticklabels=False, ax=ax221, vmin=vmin, vmax=vmax, cbar=False,
+            center=c)
+predictions = utils.TwoDPredictions(model, rp, rp, device)
+sns.heatmap(predictions, square=True, xticklabels=False, yticklabels=False, ax=ax222, vmin=vmin, vmax=vmax, cbar=False,
+            center=c)
+predictions = utils.TwoDPredictions(model, rm, rm, device)
+sns.heatmap(predictions, square=True, xticklabels=False, yticklabels=False, ax=ax223, vmin=vmin, vmax=vmax, cbar=False,
+            center=c)
+predictions = utils.TwoDPredictions(model, rp, rm, device)
+sns.heatmap(predictions, square=True, xticklabels=False, yticklabels=False, ax=ax224, vmin=vmin, vmax=vmax, cbar=False,
+            center=c)
+plt.show()
+
+# now plot on top of graph
+# im.reload(utils)
+# with open('CU_graph.pkl', 'rb') as f:
+#     G = pickle.load(f)
+#
+# nodes, edges = ox.graph_to_gdfs(G, nodes=True, edges=True)
+# fig = plt.figure(figsize=(15, 15), dpi=100)
+# ax221 = fig.add_subplot(221)
+# ax222 = fig.add_subplot(222)
+# ax223 = fig.add_subplot(223)
+# ax224 = fig.add_subplot(224)
+#
+# ns = 5
+#
+# with open('CU_graph.pkl', 'rb') as f:
+#     G = pickle.load(f)
+#
+# predictions, node_list = utils.InferNodeRiskMultiple(G, nodes.index, 0.0, 1.0, model, device, coord_bounds)
+# nx.set_node_attributes(G, {nodes.index[i]: predictions[i][0] for i in range(len(predictions))}, name='r')
+# nc = ox.plot.get_node_colors_by_attr(G, attr='r')
+# ox.plot_graph(G, ax = ax221, node_color=nc, node_size=ns, edge_linewidth=0.5, figsize=(15,15),
+#                         bgcolor='white', show=False)
+#
+# with open('CU_graph.pkl', 'rb') as f:
+#     G = pickle.load(f)
+#
+# predictions, node_list = utils.InferNodeRiskMultiple(G, nodes.index, 1.0, 1.0, model, device, coord_bounds)
+# nx.set_node_attributes(G, {nodes.index[i]: predictions[i][0] for i in range(len(predictions))}, name='r')
+# nc = ox.plot.get_node_colors_by_attr(G, attr='r')
+# ox.plot_graph(G, ax = ax222, node_color=nc, node_size=ns, edge_linewidth=0.5, figsize=(15,15),
+#                         bgcolor='white', show=False)
+#
+# with open('CU_graph.pkl', 'rb') as f:
+#     G = pickle.load(f)
+#
+# predictions, node_list = utils.InferNodeRiskMultiple(G, nodes.index, 0.0, 0.0, model, device, coord_bounds)
+# nx.set_node_attributes(G, {nodes.index[i]: predictions[i][0] for i in range(len(predictions))}, name='r')
+# nc = ox.plot.get_node_colors_by_attr(G, attr='r')
+# ox.plot_graph(G, ax = ax223, node_color=nc, node_size=ns, edge_linewidth=0.5, figsize=(15,15),
+#                         bgcolor='white', show=False)
+#
+# with open('CU_graph.pkl', 'rb') as f:
+#     G = pickle.load(f)
+#
+# predictions, node_list = utils.InferNodeRiskMultiple(G, nodes.index, 1.0, 0.0, model, device, coord_bounds)
+# nx.set_node_attributes(G, {nodes.index[i]: predictions[i][0] for i in range(len(predictions))}, name='r')
+# nc = ox.plot.get_node_colors_by_attr(G, attr='r')
+# ox.plot_graph(G, ax = ax224, node_color=nc, node_size=ns, edge_linewidth=0.5, figsize=(15,15),
+#                         bgcolor='white', show=False)
+#
+#
+# plt.show()

@@ -40,19 +40,22 @@ G = ox.add_edge_travel_times(G)
 G = ox.bearing.add_edge_bearings(G)
 G = ox.utils_graph.get_largest_component(G, strongly=True)
 
+with open('CU_graph.pkl', 'rb') as f:
+    G = pickle.load(f)
+
 #########################################################################
 ## DONT RUN THIS BLOCK IF ALL YOU WANT TO DO IS LEARN OVER THE DATASET ##
 nroutes = 100
 npairs = 1000
 stages = 200
-Edetours = 0.25
-pool_size = 50
+Edetours = 0.50
+pool_size = 63
 
 print(Edetours)
 print('-------------------- STARTING POOL PROCESSING --------------------')
 print('Pools of', pool_size, 'tasked with processing', npairs * stages, 'jobs, each with batch size', nroutes, 'in',
       stages, 'stages')
-directory = 'datasets/'
+directory = 'datasets_max5risk/'
 filename = 'res'
 file = directory + filename
 onlyfiles = [f for f in listdir(directory) if isfile(join(directory, f))]
@@ -125,7 +128,7 @@ for i in range(stages):
 # threshold = 1e6
 # d_threshold = 500
 #
-# #TODO: remove samples that pass right ON the rendezvous location
+#
 #
 # for i in range(data_size):
 #     o = routes[i][0].orig
@@ -175,7 +178,7 @@ for i in range(stages):
 # # model.add(Dropout(0.2))
 # model.add(Dense(32, activation='relu'))
 # model.add(Dropout(0.2))
-# # model.add(Dense(512, activation='relu')) # TODO: these settings slowly decrease validation loss. Investigate running this overnight tomorrow
+# # model.add(Dense(512, activation='relu'))
 # # model.add(Dropout(0.2))
 # # model.add(Dense(128, activation='relu'))
 # # model.add(Dropout(0.2))

@@ -10,6 +10,7 @@ import itertools
 import statistics
 import time
 import datetime
+import torch
 
 coords_1 = (52.2296756, 21.0122287)
 coords_2 = (52.406374, 16.9251681)
@@ -617,7 +618,7 @@ def computeCompositeRisk(routes, G):
     E = computeRendezvousEnergy(optnodes, opttimes, G)
     n_max_values = 3
     maxel = sorted(range(len(E)), key=lambda k: E[k])[-n_max_values:]
-    risk = np.mean(E)
+    risk = np.mean([E[i] for i in maxel])
 
     if len(maxel) == 0:
         risk = 1e10
@@ -680,4 +681,55 @@ def collectDataMP(routes, risks, G, data_size, d_threshold, r_threshold, pool_si
     pool.close()
 
     return results
+
+def TwoDPredictions(model, destx, desty, device, numticks=100, lr=0.0, ur=1.0):
+
+    xvals = np.tile(np.linspace(lr, ur, numticks), numticks)
+    yvals = np.linspace(lr, ur, numticks)
+    yvals = np.transpose([yvals] * numticks)
+    yvals = yvals.flatten()
+
+    destx = destx * np.ones(numticks ** 2)
+    desty = desty * np.ones(numticks ** 2)
+
+    ds = list(zip(xvals, yvals, destx, desty))
+
+    eval_set = torch.tensor(ds, dtype=torch.float64).to(device=device)
+    print(eval_set.shape)
+    with torch.no_grad():
+        model.eval()
+        predictions = model(eval_set.float())
+        predictions = predictions.cpu().numpy()
+
+    return predictions.reshape(numticks, numticks)[::-1]
+
+def InferNodeRisk(G, node, destx, desty, model, device, coord_bounds):
+    xval = G.nodes[node]['x']
+    yval = G.nodes[node]['y']
+    xval = mapRange(xval, coord_bounds['lbx'], coord_bounds['ubx'],coord_bounds['lr'],coord_bounds['ur'])
+    yval = mapRange(yval, coord_bounds['lby'], coord_bounds['uby'], coord_bounds['lr'], coord_bounds['ur'])
+    ds = list(zip([xval], [yval], [destx], [desty]))
+    eval_set = torch.tensor(ds, dtype=torch.float64).to(device=device)
+    with torch.no_grad():
+        model.eval()
+        prediction = model(eval_set.float()).cpu().numpy()
+
+    return prediction
+
+def InferNodeRiskMultiple(G, nodes, destx, desty, model, device, coord_bounds):
+    xvals = [G.nodes[node]['x'] for node in nodes]
+    yvals = [G.nodes[node]['y'] for node in nodes]
+    xvals = [mapRange(x, coord_bounds['lbx'], coord_bounds['ubx'], coord_bounds['lr'], coord_bounds['ur']) for x in xvals]
+    yvals = [mapRange(y, coord_bounds['lby'], coord_bounds['uby'], coord_bounds['lr'], coord_bounds['ur']) for y in yvals]
+    destx = destx * np.ones(len(xvals))
+    desty = desty * np.ones(len(xvals))
+    ds = list(zip(xvals, yvals, destx, desty))
+    eval_set = torch.tensor(ds, dtype=torch.float64).to(device=device)
+    with torch.no_grad():
+        model.eval()
+        predictions = model(eval_set.float()).cpu().numpy()
+
+    return predictions, nodes
+
+
 
