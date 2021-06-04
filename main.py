@@ -28,48 +28,47 @@ im.reload(utils)
 #   print("Cuda Device Available")
 #   print("Name of the Cuda Device: ", torch.cuda.get_device_name())
 #   print("GPU Computational Capablity: ", torch.cuda.get_device_capability())
+city = 'champaign'
+G = utils.getGraphWithSetting(city)
 
-places = ['Champaign, Illinois, USA', 'Urbana, Illinois, USA']
-# places = 'Chicago, Illinois, USA'       # orig[0]
-#                                         # Out[177]: 5891694350
-#                                         # dest[0]
-#                                         # Out[178]: 2844260418
-G = ox.graph_from_place(places, network_type="drive", simplify=False)
-G = ox.add_edge_speeds(G)
-G = ox.add_edge_travel_times(G)
-G = ox.bearing.add_edge_bearings(G)
-G = ox.utils_graph.get_largest_component(G, strongly=True)
-
-with open('CU_graph.pkl', 'rb') as f:
-    G = pickle.load(f)
+# with open('CU_graph.pkl', 'rb') as f:
+#     G = pickle.load(f)
 
 #########################################################################
 ## DONT RUN THIS BLOCK IF ALL YOU WANT TO DO IS LEARN OVER THE DATASET ##
 nroutes = 100
 npairs = 1000
 stages = 200
-Edetours = 0.50
-pool_size = 63
+Edetours = 1
+pool_size = 64
 
 print(Edetours)
 print('-------------------- STARTING POOL PROCESSING --------------------')
 print('Pools of', pool_size, 'tasked with processing', npairs * stages, 'jobs, each with batch size', nroutes, 'in',
       stages, 'stages')
-directory = 'datasets_max5risk/'
+directory = 'dataset_champaign_max5risk/'
 filename = 'res'
+
+with open(directory+city+'_graph.pkl', 'wb') as f:
+    pickle.dump(G, f)
+
 file = directory + filename
 onlyfiles = [f for f in listdir(directory) if isfile(join(directory, f))]
+badfiles = []
 if len(onlyfiles) > 0:
-    idxs = [re.findall("\d+", onlyfiles[i])[0] for i in range(len(onlyfiles))]
-    idxs = list(map(int, idxs))
-    shiftval = np.max(idxs)
+    idxs = [re.findall("\d+", onlyfiles[i])[0] for i in range(len(onlyfiles)) if onlyfiles[i][0] is 'r']
+    if len(idxs) > 0:
+        idxs = list(map(int, idxs))
+        shiftval = np.max(idxs)
+    else:
+        shiftval = 0
 else:
     shiftval = 0
 
 for i in range(stages):
     file_idx = i + shiftval + 1
     print('------------------ Stage', i + 1, '------------------')
-    results = utils.fastBigData(G, nroutes, npairs, Edetours, pool_size)
+    results = utils.fastBigData(G, city, nroutes, npairs, Edetours, pool_size)
     localfile = file + str(file_idx) + '.pkl'
     print('Saving to', localfile)
     with open(localfile, 'wb') as f:
@@ -79,7 +78,14 @@ for i in range(stages):
     with open(localfile, 'rb') as f:
         res_pkl = pickle.load(f)
 
-    print('File open successful, EOF')
+    print('File open successful, testing unpack')
+    try:
+        ro, ri, dd = zip(*res_pkl)
+    except Exception as ex:
+        print(ex)
+        print(localfile + ' encoutered a problem unpacking INVESTIGATE')
+        badfiles.append(localfile)
+    print('EOF, moving to next stage')
 
 #########################################################################
 #########################################################################

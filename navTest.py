@@ -35,7 +35,7 @@ EARTH_RADIUS_M = 6_371_009
 # G, gdf, gdf_water, gdf_parks = utils.getUCMap()
 places = ['Champaign, Illinois, USA', 'Urbana, Illinois, USA']
 # places = 'Chicago, Illinois, USA'
-G = ox.graph_from_place(places, network_type="drive", simplify=False)
+G = ox.graph_from_place(places, network_type="drive", simplify=True)
 G = ox.add_edge_speeds(G)
 G = ox.add_edge_travel_times(G)
 G = ox.bearing.add_edge_bearings(G)
@@ -90,7 +90,7 @@ places = ['Champaign, Illinois, USA', 'Urbana, Illinois, USA']
 #                                         # Out[177]: 5891694350
 #                                         # dest[0]
 #                                         # Out[178]: 2844260418
-G = ox.graph_from_place(places, network_type="drive", simplify=False)
+G = ox.graph_from_place(places, network_type="drive", simplify=True)
 G = ox.add_edge_speeds(G)
 G = ox.add_edge_travel_times(G)
 G = ox.bearing.add_edge_bearings(G)
@@ -103,7 +103,7 @@ dest = random.sample(list(G), nroutes)
 
 route1 = ox.shortest_path(G, orig[0], dest[0], weight="travel_time")
 im.reload(utils)
-r = utils.iRoute(G, orig[0], dest[0], 0.1)
+r = utils.iRoute(G, orig[0], dest[0], 0.8)
 utils.compRoute(r, G)
 routes = []
 

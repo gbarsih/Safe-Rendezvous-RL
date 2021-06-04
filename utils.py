@@ -4,6 +4,7 @@ import networkx as nx
 import matplotlib.pyplot as plt
 import math
 import geopy.distance as gd
+import pandas as pd
 import random
 from multiprocessing import Pool as ThreadPool
 import itertools
@@ -11,11 +12,16 @@ import statistics
 import time
 import datetime
 import torch
+from pprint import pprint
 
 coords_1 = (52.2296756, 21.0122287)
 coords_2 = (52.406374, 16.9251681)
 
 depot = (40.11237526379417, -88.24327192934085)
+depot_champaign = (40.11237526379417, -88.24327192934085)
+depot_chicago = (41.84477746620278, -87.68189749403619)
+
+figsize = (25, 15)
 
 print(gd.distance(coords_1, coords_2).km)
 
@@ -122,26 +128,35 @@ def getRouteData(G, route):
     s = []
     t = []
     d = []
+    # for u, v in zip(route[:-1], route[1:]):
+    #     # if there are parallel edges, select the shortest in length
+    #     data = min(G.get_edge_data(u, v).values(), key=lambda d: d["length"])
+    #     if "geometry" in data:
+    #         # if geometry attribute exists, add all its coords to list
+    #         xs, ys = data["geometry"].xy
+    #         x.extend(xs)
+    #         y.extend(ys)
+    #         s.extend([a for a in data.values()][-3] * np.ones(len(xs)))
+    #         t.extend([a for a in data.values()][-2] * np.ones(len(xs)))
+    #     else:
+    #         # otherwise, the edge is a straight line from node to node
+    #         x.append(G.nodes[u]["x"])
+    #         y.append(G.nodes[u]["y"])
+    #         s.extend([a for a in data.values()][-3] * np.ones(2))
+    #         d.extend([a for a in data.values()][-4] * np.ones(2))
+    #         t.extend([a for a in data.values()][-2] * np.ones(1))
+    #         # print(data)
+    #         # print([a for a in data.values()][-2])
+    #         # print(t)
+
     for u, v in zip(route[:-1], route[1:]):
         # if there are parallel edges, select the shortest in length
         data = min(G.get_edge_data(u, v).values(), key=lambda d: d["length"])
-        if "geometry" in data:
-            # if geometry attribute exists, add all its coords to list
-            xs, ys = data["geometry"].xy
-            x.extend(xs)
-            y.extend(ys)
-            s.extend([a for a in data.values()][-3] * np.ones(len(xs)))
-            t.extend([a for a in data.values()][-2] * np.ones(len(xs)))
-        else:
-            # otherwise, the edge is a straight line from node to node
-            x.append(G.nodes[u]["x"])
-            y.append(G.nodes[u]["y"])
-            s.extend([a for a in data.values()][-3] * np.ones(2))
-            d.extend([a for a in data.values()][-4] * np.ones(2))
-            t.extend([a for a in data.values()][-2] * np.ones(1))
-            # print(data)
-            # print([a for a in data.values()][-2])
-            # print(t)
+        x.append(G.nodes[u]["x"])
+        y.append(G.nodes[u]["y"])
+        s.extend([a for a in data.values()][-3] * np.ones(2))
+        d.extend([a for a in data.values()][-4] * np.ones(2))
+        t.extend([a for a in data.values()][-2] * np.ones(1))
 
     lx = len(x)
     ly = len(y)
@@ -151,31 +166,25 @@ def getRouteData(G, route):
     if lx != ly | ls != lx | lt != lx:
         raise Exception("Something went wrong, route data doesnt have the same dimensions")
 
-    return np.array(x), np.array(y), np.array(s), np.array(t), np.array(d)
+    return x, y, s, t, d
 
 
 # a workable route object
 class iRoute:
 
-    def __init__(self, G, orig, dest, p=0.0, t0=0.0, pos=0):
+    def __init__(self, G, city, orig, dest, p=0.0, t0=0.0, pos=0):
         self.route = ox.shortest_path(G, orig, dest, weight="travel_time")
         x, y, s, t, d = getRouteData(G, self.route)
         self.x = x  # position
         self.y = y
-        # self.s = s  # speeds
-        # # self.v = v  # calculated velocity
         self.t = t  # time for transition
-        self.optNode = computeOptRdvNode(x, y, t)
-        self.tr = self.t[self.optNode]
-        self.optNode = self.route[self.optNode]
-        # self.n = n  # simulation steps to transition
-        # self.d = d  # distance to cover
+        # self.optNode = computeOptRdvNode(x, y, t, city)
+        # self.tr = self.t[self.optNode]
+        # self.optNode = self.route[self.optNode]
         self.pos = pos  # position (node index)
-        # self.gt0 = t0
         self.edge_timer = 0.0
         self.local_time = 0.0
         self.dt = sim_env_dt
-        # self.route_steps = sum(self.n)
         self.lt = len(self.t)
         self.completed = False
         self.nodes = [orig]
@@ -185,6 +194,7 @@ class iRoute:
         self.orig = orig
         self.dest = dest
         self.risk = 0.0
+        self.deviated = False
 
     # this function progresses to the next node
     def progress(self, G, local_state=None):
@@ -193,38 +203,48 @@ class iRoute:
         if self.pos >= 0:
             node_list, an = OneDegSep(G, self.route[self.pos], self.route[self.pos - 1], self.route[self.pos + 1])
             if local_state is not None:
-                jump = local_state.uniform(0, 1) < self.p
+                jump = local_state.uniform(0, 1) < self.p and len(self.route) > 2 and self.lt - 1 > self.pos > 1
             else:
-                jump = np.random.uniform(0, 1) < self.p
+                jump = np.random.uniform(0, 1) < self.p and len(self.route) > 2 and self.lt - 1 > self.pos > 1
 
             if len(node_list) > 1 and jump:
                 # print("rerouting!!",node_list, self.pos)
-                self.route = reRoute(G, self.route[self.pos], node_list[np.random.randint(0, len(node_list))],
+                newRoute = reRoute(G, self.route[self.pos], node_list[np.random.randint(0, len(node_list))],
                                      self.dest)
-                x, y, s, t, d = computeIntervals(G, self.route, 0.0);
-                self.t = t  # time for transition
-                self.pos = 0
-                self.lt = len(self.t)
+                if len(newRoute) > 3:
+                    self.deviated = True
+                    self.route = newRoute
+                    x, y, s, t, d = computeIntervals(G, self.route, 0.0);
+                    self.t = t  # time for transition
+                    self.pos = 0
+                    self.lt = len(self.t)
+                else:
+                    self.pos += 1 #ignore new route, too short
             else:
                 self.pos += 1  # advance one node
 
         self.nodes.append(self.route[self.pos])
-        self.times.append(self.local_time + self.t_0)
-        self.edge_timer = self.dt * 0.1  # 1 if progressing to the next node is an action
+        self.times.append(self.t[self.pos] + self.t_0)
+        # if len(self.t) < self.pos:
+        #     self.times.append(self.t[self.pos] + self.t_0)
+        # elif len(self.t) > 0:
+        #     self.times.append(self.t[len(self.t)-1] + self.t_0)
+        # else:
+        #     print('comp_status', self.completed)
+        #     print('t', self.t)
+        #     print('pos', self.pos)
+        #     print('nodes', self.nodes)
+        #     print('route', self.route)
+        #     pprint(locals())
+        #     raise Exception('null length in t')
+        # self.edge_timer = self.dt * 0.1  # 1 if progressing to the next node is an action
         return True
 
     # this function advances one time step
     def step(self, G, local_state=None):
-        self.edge_timer += self.dt
-        self.local_time += self.dt
+        # self.edge_timer += self.dt
+        # self.local_time += self.dt
         stat = None
-        # if self.edge_timer >= self.t[self.pos] and self.pos < self.lt-1 and self.completed == False:
-        #     #print("Pos:", self.pos, "Travel Time:", self.t[self.pos], "Edge Time:", self.edge_timer, "Local Time:",
-        #     #      self.local_time)
-        #     stat = self.progress(G)
-        # elif self.pos == self.lt-1 and self.completed == False:
-        #     self.completed = True
-        #     #print("At end of route, pos=", self.pos, "length of t=", self.lt, "Completed:", self.completed)
 
         if self.pos < self.lt - 1 and self.completed == False:
             stat = self.progress(G, local_state)
@@ -318,9 +338,9 @@ def iRouteIterator(routes, G):
 
 def compRoute(r, G, seed=123):
     local_state = np.random.RandomState(seed)
-    random.seed(seed)
+    # random.seed(seed)
     i = 0
-    while not r.completed and i < 1e10:
+    while not r.completed and i < 1e3:
         i += 1
         r.step(G, local_state)
         # r.printDeg(G)
@@ -363,7 +383,7 @@ def clip(x, l, u):
     return l if x < l else u if x > u else x
 
 
-def routeTotalDetourProbality(G, orig, dest, Edetours, t_0=0.0):
+def routeTotalDetourProbality(G, city, orig, dest, Edetours, t_0=0.0):
     nom_route = ox.shortest_path(G, orig, dest, weight='travel_time')
     d = nDetourOpportunities(nom_route, G)
     if d > 2:
@@ -373,7 +393,7 @@ def routeTotalDetourProbality(G, orig, dest, Edetours, t_0=0.0):
     else:
         p = 0.0
 
-    return iRoute(G, orig, dest, p, t_0)
+    return iRoute(G, city, orig, dest, p, t_0)
 
 
 def createDataSetPar(G, nroutes=100, Edetours=1, sparse=False):
@@ -437,10 +457,12 @@ def routeRiskBatch(G, o, d, Edetours, t_0, nroutes, pool_size=cpus):
     return results, risk
 
 
-def routeRiskSingle(G, o, d, Edetours, t_0, nroutes):
+def routeRiskSingle(G, o, d, Edetours, t_0, nroutes, city):
+    # print('routeRiskSingle start:', city)
     routes = []
     start = time.time()
     invalid = False
+
     for i in range(nroutes):
         try:
             if i == 0:
@@ -448,7 +470,7 @@ def routeRiskSingle(G, o, d, Edetours, t_0, nroutes):
             else:
                 Edetours_l = Edetours
 
-            routes.append(routeTotalDetourProbality(G, o, d, Edetours_l, t_0))
+            routes.append(routeTotalDetourProbality(G, city, o, d, Edetours_l, t_0))
         except Exception as ex:
             print(ex)
             print("Skipping this dest/orig pair")
@@ -460,34 +482,52 @@ def routeRiskSingle(G, o, d, Edetours, t_0, nroutes):
     risk = 1e10
     if not invalid:
         for i in range(nroutes):
-            compRoute(routes[i], G)
+            compRoute(routes[i], G, np.random.randint(1, 1e5))
 
-        risk = getRiskValue(routes, G)
+        risk = getRiskValue(routes, G, city)
         end = time.time()
         elapsed = end - start
         print(datetime.datetime.now(), "Finished batch of risk computation in", elapsed)
+        delta = risk - getSingleRouteCost(o, d, G, city)
+        # pprint(locals())
+        return routes, risk, delta
 
-    if len(routes) > 0:
-        routes = [routes[0]]
-
-    return routes, risk
+    else:
+        return
 
 
-def fastBigData(G, nroutes=100, npairs=100, Edetours=1, pool_size=cpus):
+
+def fastBigData(G, city, nroutes=100, npairs=100, Edetours=1, pool_size=cpus):
+    # print('fastBigData', city)
     pool_size = np.minimum(pool_size, cpus)
     pool = ThreadPool(pool_size)
-    orig = random.choices(list(G), k=npairs)  # orig/dest pairs
-    dest = random.choices(list(G), k=npairs)
+    orig_b = random.choices(list(G), k=npairs)  # orig/dest pairs
+    dest_b = random.choices(list(G), k=npairs)
+
+    #instead of doing this, lets compute djikstra
+
+    # y_o = [G.nodes[node]['y'] for node in orig_b]
+    # x_o = [G.nodes[node]['x'] for node in orig_b]
+    # y_d = [G.nodes[node]['y'] for node in dest_b]
+    # x_d = [G.nodes[node]['x'] for node in dest_b]
+
+    idxs = [i for i in range(npairs) if len(ox.shortest_path(G, orig_b[i], dest_b[i], weight="travel_time")) > 5]
+
+    orig = [orig_b[i] for i in idxs]
+    dest = [dest_b[i] for i in idxs]
+
+    print('Selected', len(idxs), 'pairs for evaluation out of a possible', npairs)
+
     t_0 = 0.0
     start = time.time()
     results = pool.starmap(routeRiskSingle,
                            zip(itertools.repeat(G), orig, dest, itertools.repeat(Edetours), itertools.repeat(t_0),
-                               itertools.repeat(nroutes)))
-
+                               itertools.repeat(nroutes), itertools.repeat(city)))
+    # results = routeRiskSingle(G,orig[0],dest[0],Edetours,t_0,nroutes,city)
     pool.close()
     end = time.time()
     elapsed = end - start
-    print("Finished everything in", elapsed)
+    print("Finished everything in", elapsed, city)
     return results
 
 
@@ -540,20 +580,40 @@ def plotRoutes(routes, nroutes, G, color='r', save=False, filepath='images/route
 def costFun(d, t):
     alpha = 1
     t = np.maximum(t, 0.1)
-    return 1 / 2 * d ** 2 * t + alpha * t
+    return (d ** 2) / t + alpha * t
     # return d
 
 
-def computeOptRdvNode(x, y, t):
+def computeOptRdvNode(x, y, t, city):
+    # pprint(locals())
+    # print('computeOptRdvNode', city)
+    if city == 'champaign':
+        depot_local = depot_champaign
+
+    elif city == 'chicago':
+        depot_local = depot_chicago
+
+    elif city == 'janeiro':
+        depot_local = depot_rio
+
+    else:
+        raise Exception(city, ': invalid city')
+
     n = len(x) - 1
     E = []
+    tr = np.cumsum(t)
+    # print(len(x), len(t), len(tr))
     for i in range(n):
-        d = gd.distance((y[i], x[i]), depot).m
-        tr = sum(t[0:i + 1])
-        e = costFun(d, tr)
+        d = gd.distance((y[i], x[i]), depot_local).m
+        e = costFun(d, tr[i])
         E.append(e)
 
-    return np.argmin(E)
+    if len(E) == 0:
+        return None
+    else:
+        return np.argmin(E)
+
+
 
 
 def computeRendezvousEnergy(nodes, times, G):
@@ -565,16 +625,10 @@ def computeRendezvousEnergy(nodes, times, G):
         y = G.nodes[node]['y']
         x = G.nodes[node]['x']
         d = gd.distance((y, x), depot).m
-        tr = time
-        e = costFun(d, tr)
+        e = costFun(d, time)
         E.append(e)
 
     return E
-
-
-def computeRisk(optnode, tr, nodes, times):
-    # find the closest time:
-    ti = np.argmin()
 
 
 def getxy(node, G):
@@ -588,7 +642,8 @@ def getDepotNodeDistance(node, G):
     y = G.nodes[node]["y"]
 
 
-def computeCompositeRisk(routes, G):
+def computeCompositeRisk(routes, G, city):
+    # print('computeCompositeRisk', city)
     # we are given many routes, we want to compute the risk of this set of routes.
     # we need the optimum rdv node and time for ever singe one:
     optnodes = []
@@ -603,12 +658,14 @@ def computeCompositeRisk(routes, G):
             y.append(yn)
 
         # compute distances to depot
-        idx = computeOptRdvNode(x, y, r.t)
-        idxs.append(idx)
-        optnode = r.nodes[idx]
-        optnodes.append(optnode)
-        opttime = r.times[idx]
-        opttimes.append(opttime)
+        # print('just before computeOptRdvNode:', city)
+        idx = computeOptRdvNode(x, y, r.times, city)
+        if idx is not None:
+            idxs.append(idx)
+            optnode = r.nodes[idx]
+            optnodes.append(optnode)
+            opttime = r.times[idx]
+            opttimes.append(opttime)
 
         # p1 = merge(y,x)
         # result = list(map(gd.distance, p1, itertools.repeat(depot)))
@@ -616,8 +673,12 @@ def computeCompositeRisk(routes, G):
 
     # now we can compute some risk measures.
     E = computeRendezvousEnergy(optnodes, opttimes, G)
-    n_max_values = 3
+    n_max_values = 5
     maxel = sorted(range(len(E)), key=lambda k: E[k])[-n_max_values:]
+    # print("energies in cvar", [E[i] for i in maxel])
+    if len(E) == 0:
+        print(routes[0].nodes)
+
     risk = np.mean([E[i] for i in maxel])
 
     if len(maxel) == 0:
@@ -626,8 +687,31 @@ def computeCompositeRisk(routes, G):
     return optnodes, opttimes, E, idxs, risk
 
 
-def getRiskValue(routes, G):
-    optnodes, opttimes, E, idxs, risk = computeCompositeRisk(routes, G)
+def getSingleRouteCost(o, d, G, city):
+    r = iRoute(G, city, o, d)
+    compRoute(r, G)
+    optnodes = []
+    opttimes = []
+    idxs = []
+    x = []
+    y = []
+    for i in r.nodes:
+        xn, yn = getxy(i, G)
+        x.append(xn)
+        y.append(yn)
+
+    idx = computeOptRdvNode(x, y, r.t, city)
+    idxs.append(idx)
+    optnodes.append(r.nodes[idx])
+    opttimes.append(r.times[idx])
+    E = computeRendezvousEnergy(optnodes, opttimes, G)
+
+    return min(E)
+
+
+def getRiskValue(routes, G, city):
+    # print('getRiskValue start:', city)
+    optnodes, opttimes, E, idxs, risk = computeCompositeRisk(routes, G, city)
     return risk
 
 
@@ -682,8 +766,8 @@ def collectDataMP(routes, risks, G, data_size, d_threshold, r_threshold, pool_si
 
     return results
 
-def TwoDPredictions(model, destx, desty, device, numticks=100, lr=0.0, ur=1.0):
 
+def TwoDPredictions(model, destx, desty, device, numticks=1000, lr=0.0, ur=1.0):
     xvals = np.tile(np.linspace(lr, ur, numticks), numticks)
     yvals = np.linspace(lr, ur, numticks)
     yvals = np.transpose([yvals] * numticks)
@@ -703,10 +787,11 @@ def TwoDPredictions(model, destx, desty, device, numticks=100, lr=0.0, ur=1.0):
 
     return predictions.reshape(numticks, numticks)[::-1]
 
+
 def InferNodeRisk(G, node, destx, desty, model, device, coord_bounds):
     xval = G.nodes[node]['x']
     yval = G.nodes[node]['y']
-    xval = mapRange(xval, coord_bounds['lbx'], coord_bounds['ubx'],coord_bounds['lr'],coord_bounds['ur'])
+    xval = mapRange(xval, coord_bounds['lbx'], coord_bounds['ubx'], coord_bounds['lr'], coord_bounds['ur'])
     yval = mapRange(yval, coord_bounds['lby'], coord_bounds['uby'], coord_bounds['lr'], coord_bounds['ur'])
     ds = list(zip([xval], [yval], [destx], [desty]))
     eval_set = torch.tensor(ds, dtype=torch.float64).to(device=device)
@@ -716,11 +801,14 @@ def InferNodeRisk(G, node, destx, desty, model, device, coord_bounds):
 
     return prediction
 
+
 def InferNodeRiskMultiple(G, nodes, destx, desty, model, device, coord_bounds):
     xvals = [G.nodes[node]['x'] for node in nodes]
     yvals = [G.nodes[node]['y'] for node in nodes]
-    xvals = [mapRange(x, coord_bounds['lbx'], coord_bounds['ubx'], coord_bounds['lr'], coord_bounds['ur']) for x in xvals]
-    yvals = [mapRange(y, coord_bounds['lby'], coord_bounds['uby'], coord_bounds['lr'], coord_bounds['ur']) for y in yvals]
+    xvals = [mapRange(x, coord_bounds['lbx'], coord_bounds['ubx'], coord_bounds['lr'], coord_bounds['ur']) for x in
+             xvals]
+    yvals = [mapRange(y, coord_bounds['lby'], coord_bounds['uby'], coord_bounds['lr'], coord_bounds['ur']) for y in
+             yvals]
     destx = destx * np.ones(len(xvals))
     desty = desty * np.ones(len(xvals))
     ds = list(zip(xvals, yvals, destx, desty))
@@ -732,4 +820,311 @@ def InferNodeRiskMultiple(G, nodes, destx, desty, model, device, coord_bounds):
     return predictions, nodes
 
 
+def getGraphWithSetting(city):
+    if city is 'champaign':
+        places = ['Champaign, Illinois, USA', 'Urbana, Illinois, USA']
+        # places = 'Chicago, Illinois, USA'       # orig[0]
+        #                                         # Out[177]: 5891694350
+        #                                         # dest[0]
+        #                                         # Out[178]: 2844260418
+        G = ox.graph_from_place(places, network_type="drive", simplify=True)
+        G = ox.add_edge_speeds(G)
+        G = ox.add_edge_travel_times(G)
+        G = ox.bearing.add_edge_bearings(G)
+        G = ox.utils_graph.get_largest_component(G, strongly=True)
 
+    elif city is 'chicago':
+        places = ['Chicago, Illinois, USA']
+        G = ox.graph_from_place(places, network_type="drive", simplify=True)
+        G = ox.add_edge_speeds(G)
+        G = ox.add_edge_travel_times(G)
+        G = ox.bearing.add_edge_bearings(G)
+        G = ox.utils_graph.get_largest_component(G, strongly=True)
+
+    elif city is 'janeiro':
+        places = ['Rio de Janeiro, Rio de Janeiro, Brazil']
+        G = ox.graph_from_place(places, network_type="drive", simplify=True)
+        G = ox.add_edge_speeds(G)
+        G = ox.add_edge_travel_times(G)
+        G = ox.bearing.add_edge_bearings(G)
+        G = ox.utils_graph.get_largest_component(G, strongly=True)
+
+    return G
+
+
+def plotCityMapForSlides(city, fmt='png'):
+    G = getGraphWithSetting(city)
+    filepath = 'images/' + city + '_map.' + fmt
+    ox.plot_graph(G, node_size=1, node_color="#a3a3a3", edge_color="#a3a3a3", edge_linewidth=0.5,
+                  bgcolor="#ffffff", show=False, dpi=600, figsize=(20, 15), save=True, filepath=filepath);
+    plt.show()
+
+
+def plotRouteDistr(city, fmt='png'):
+    G = getGraphWithSetting(city)
+    filepath = 'images/' + city + '_distr.' + fmt
+    nroutes = 30
+
+    orig = random.sample(list(G), nroutes)
+    dest = random.sample(list(G), nroutes)
+
+    routes = []
+
+    for i in range(100):
+        try:
+            routes.append(iRoute(G, orig[0], dest[0], 0.05))
+        except Exception as ex:
+            print(ex)
+
+    i = 0
+    while not CheckCompletion(routes) and i < 1e6:
+        i += 1
+        iRouteIterator(routes, G)
+
+    nodes, times = GatherRoutes(routes)
+
+    fig, ax = ox.plot_graph(G, node_size=1, node_color="#a3a3a3", edge_color="#a3a3a3", edge_linewidth=0.5,
+                            bgcolor="#ffffff", show=False, dpi=600, figsize=figsize)
+
+    ox.plot_graph_routes(
+        G, ax=ax, routes=nodes, route_colors='r', route_linewidth=3, node_size=0, route_alpha=0.2,
+        close=False, show=False, dpi=600, figsize=figsize, save=True, filepath=filepath);
+    plt.show()
+
+
+def plotCityMapWithFeatures(city, fmt='png'):
+    G = getGraphWithSetting(city)
+    filepath = 'images/' + city + '_feat.' + fmt
+
+    _gdf = ox.geometries_from_place("Champaign County, Illinois, USA", {"building": True})
+    _gdf_parks = ox.geometries_from_place("Champaign County, Illinois, USA", {"leisure": 'park'})
+    _gdf_water = ox.geometries_from_place("Champaign County, Illinois, USA", {"water": True})
+
+    ox.plot_graph(G, node_size=1, node_color="#a3a3a3", edge_color="#a3a3a3", edge_linewidth=0.5,
+                  bgcolor="#ffffff", show=False, dpi=600, figsize=(20, 15), save=True, filepath=filepath);
+
+
+def reverse_bearing(x):
+    return x + 180 if x < 180 else x - 180
+
+
+def count_and_merge(n, bearings):
+    # make twice as many bins as desired, then merge them in pairs
+    # prevents bin-edge effects around common values like 0° and 90°
+    n = n * 2
+    bins = np.arange(n + 1) * 360 / n
+    count, _ = np.histogram(bearings, bins=bins)
+
+    # move the last bin to the front, so eg 0.01° and 359.99° will be binned together
+    count = np.roll(count, 1)
+    return count[::2] + count[1::2]
+
+
+def polar_plot(ax, bearings, n=36, title=''):
+    bins = np.arange(n + 1) * 360 / n
+    count = count_and_merge(n, bearings)
+    _, division = np.histogram(bearings, bins=bins)
+    frequency = count / count.sum()
+    division = division[0:-1]
+    width = 2 * np.pi / n
+
+    ax.set_theta_zero_location('N')
+    ax.set_theta_direction('clockwise')
+
+    x = division * np.pi / 180
+    bars = ax.bar(x, height=frequency, width=width, align='center', bottom=0, zorder=2,
+                  color='#003366', edgecolor='k', linewidth=0.5, alpha=0.7)
+
+    ax.set_ylim(top=frequency.max())
+
+    title_font = {'family': 'Century Gothic', 'size': 24, 'weight': 'bold'}
+    xtick_font = {'family': 'Century Gothic', 'size': 10, 'weight': 'bold', 'alpha': 1.0, 'zorder': 3}
+    ytick_font = {'family': 'Century Gothic', 'size': 9, 'weight': 'bold', 'alpha': 0.2, 'zorder': 3}
+
+    ax.set_title(title.upper(), y=1.05, fontdict=title_font)
+
+    ax.set_yticks(np.linspace(0, max(ax.get_ylim()), 5))
+    yticklabels = ['{:.2f}'.format(y) for y in ax.get_yticks()]
+    yticklabels[0] = ''
+    ax.set_yticklabels(labels=yticklabels, fontdict=ytick_font)
+
+    xticklabels = ['N', '', 'E', '', 'S', '', 'W', '']
+    ax.set_xticklabels(labels=xticklabels, fontdict=xtick_font)
+    ax.tick_params(axis='x', which='major', pad=-2)
+
+
+def plotStreetBearings():
+    places = {#'Champaign': 'Champaign, IL, USA',
+              #'Urbana': 'Urbana, IL, USA',
+              'Chicago': 'Chicago, IL, USA',
+              'Rio de Janeiro': 'Rio de Janeiro, Rio de Janeiro, Brazil',
+              'Sao Paulo': 'Sao Paulo, Sao Paulo, Brazil',
+              'Athens': 'Athens, Greece',
+              'New Delhi': 'New Delhi, India',
+              'Yerevan': 'Yerevan, Armenia',
+              'San Francisco': 'San Francisco, CA, USA',
+              'Belgrade': 'Belgrade, Serbia',
+              'Modena': 'Modena, Italy',
+              }
+
+    bearings = {}
+    weight_by_length = False
+    for place in sorted(places.keys()):
+        print(datetime.datetime.now(), place)
+
+        # get the graph
+        query = places[place]
+        print('getting graph from', place)
+        if place == 'Athens':
+            G = ox.graph_from_address('Athens, Greece', dist = 7000, network_type='drive')
+        else:
+            G = ox.graph_from_place(query, network_type='drive')
+
+        # calculate edge bearings
+        print('getting undirected graph from', place)
+        Gu = ox.add_edge_bearings(ox.get_undirected(G))
+
+        if weight_by_length:
+            # weight bearings by length (meters)
+            city_bearings = []
+            for u, v, k, d in Gu.edges(keys=True, data=True):
+                city_bearings.extend([d['bearing']] * int(d['length']))
+            b = pd.Series(city_bearings)
+            bearings[place] = pd.concat([b, b.map(reverse_bearing)]).reset_index(drop='True')
+        else:
+            print('getting bearings from', place)
+            # don't weight bearings, just take one value per street segment
+            b = pd.Series([d['bearing'] for u, v, k, d in Gu.edges(keys=True, data=True)])
+            bearings[place] = pd.concat([b, b.map(reverse_bearing)]).reset_index(drop='True')
+
+    n = len(places)
+    ncols = int(np.ceil(np.sqrt(n)))
+    nrows = int(np.ceil(n / ncols))
+    figsize = (ncols * 5, nrows * 5)
+    fig, axes = plt.subplots(nrows, ncols, figsize=figsize, subplot_kw={'projection': 'polar'})
+
+    # plot each city's polar histogram
+    for ax, place in zip(axes.flat, sorted(places.keys())):
+        polar_plot(ax, bearings[place].dropna(), title=place)
+
+    # add super title and save full image
+    suptitle_font = {'family': 'Century Gothic', 'fontsize': 40, 'fontweight': 'normal', 'y': 0.98}
+    fig.suptitle('City Street Network Orientation', **suptitle_font)
+    fig.tight_layout()
+    fig.subplots_adjust(hspace=0.35)
+    fig.savefig('images/street-orientations.png', dpi=120, bbox_inches='tight')
+    plt.show()
+
+
+def getNominalRisk(route, risk, G, city):
+    orig = route.orig
+    dest = route.dest
+    nom_route = iRoute(G, city, orig, dest)
+    compRoute(nom_route, G)
+    try:
+        optnodes, opttimes, E, idxs, risk_nom = computeCompositeRisk([nom_route], G, city)
+        delta = risk - E[0]
+        return delta
+    except Exception as ex:
+        print(ex)
+        print(route, nom_route, route.nodes)
+
+
+def plotRoutesAndOptNode(G, city, nroutes=100, Edetours=1):
+    o = random.choices(list(G), k=1)[0]  # orig/dest pairs
+    d = random.choices(list(G), k=1)[0]
+    # print('routeRiskSingle start:', city)
+    routes = []
+    start = time.time()
+    invalid = False
+
+    for i in range(nroutes):
+        try:
+            if i == 0:
+                Edetours_l = 0.0
+            else:
+                Edetours_l = Edetours
+
+            routes.append(routeTotalDetourProbality(G, city, o, d, Edetours_l, 0.0))
+        except Exception as ex:
+            print(ex)
+            print("Skipping this dest/orig pair")
+            invalid = True
+            routes = []
+            break
+
+    nroutes = len(routes)
+    risk = 1e10
+    if not invalid:
+        for i in range(nroutes):
+            compRoute(routes[i], G, np.random.randint(1, 1e5))
+            # print(routes[i].deviated, routes[i].p)
+
+        optnodes, opttimes, E, idxs, risk = computeCompositeRisk(routes, G, city)
+        # print(optnodes)
+        # print(routes[0].orig, routes[0].dest)
+        end = time.time()
+        elapsed = end - start
+        print(datetime.datetime.now(), "Finished batch of risk computation in", elapsed)
+        delta = risk - getSingleRouteCost(o, d, G, city)
+        print("delta", delta, "mincost", getSingleRouteCost(o, d, G, city))
+
+    nodes, times = GatherRoutes(routes)
+
+    plotNodeEnergies(nodes[0], times[0], G, city, E)
+
+    fig, ax = ox.plot_graph(G, node_size=1, node_color="#a3a3a3", edge_color="#a3a3a3", edge_linewidth=0.5,
+                            bgcolor="#ffffff", show=False, dpi=600, figsize=(20, 20))
+
+    fig, ax = ox.plot_graph_routes(
+        G, ax=ax, routes=nodes, route_colors='r', route_linewidth=3, node_size=0,
+        route_alpha=0.1,
+        close=False, show=False, dpi=600, figsize=(20, 20));
+    ax = scatterGraph(optnodes, G, ax)
+    plt.show()
+
+    return nodes, times
+
+
+def plotNodeEnergies(nodes, times, G, city, Eo):
+    depot_local = getDepotLocation(city)
+
+    tr = np.cumsum(times)
+    E = []
+    D = []
+    for n, t in zip(nodes, tr):
+        d = gd.distance((G.nodes[n]['y'], G.nodes[n]['x']), depot_local).m
+        e = costFun(d, t)
+        E.append(e)
+        D.append(d)
+
+    fig = plt.figure(figsize=(25, 15), dpi=100)
+    plt.subplot(2, 2, 1)
+    plt.plot(E)
+    plt.title('Nom Route Energy')
+    plt.subplot(2, 2, 2)
+    plt.plot(D)
+    plt.title('Nom Route Distance')
+    plt.subplot(2, 2, 3)
+    plt.plot(tr)
+    plt.title('Nom Route Times')
+    plt.subplot(2, 2, 4)
+    plt.plot(times)
+    plt.title('non - cumsum')
+    plt.show()
+
+
+def getDepotLocation(city):
+    if city == 'champaign':
+        depot_local = depot_champaign
+
+    elif city == 'chicago':
+        depot_local = depot_chicago
+
+    elif city == 'janeiro':
+        depot_local = depot_rio
+
+    else:
+        raise Exception(city, ': invalid city')
+
+    return depot_local
