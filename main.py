@@ -28,7 +28,7 @@ im.reload(utils)
 #   print("Cuda Device Available")
 #   print("Name of the Cuda Device: ", torch.cuda.get_device_name())
 #   print("GPU Computational Capablity: ", torch.cuda.get_device_capability())
-city = 'champaign'
+city = 'chicago'
 G = utils.getGraphWithSetting(city)
 
 # with open('CU_graph.pkl', 'rb') as f:
@@ -40,13 +40,13 @@ nroutes = 100
 npairs = 1000
 stages = 200
 Edetours = 1
-pool_size = 64
+pool_size = 50
 
 print(Edetours)
 print('-------------------- STARTING POOL PROCESSING --------------------')
 print('Pools of', pool_size, 'tasked with processing', npairs * stages, 'jobs, each with batch size', nroutes, 'in',
       stages, 'stages')
-directory = 'dataset_champaign_max5risk/'
+directory = 'dataset_'+city+'_max5risk/'
 filename = 'res'
 
 with open(directory+city+'_graph.pkl', 'wb') as f:
@@ -123,7 +123,7 @@ for i in range(stages):
 # dxp = []
 # dyp = []
 # rrv = []
-# rrc = []
+# rrd = []
 #
 # rp = []
 # rxp = []
@@ -152,7 +152,7 @@ for i in range(stages):
 #         ryp.append(G.nodes[r]['y'])
 #
 #         rrv.append(risks[i])
-#         rrc.append(risks[i])
+#         rrd.append(risks[i])
 #
 # ur = 1.0
 # lr = 0.0
@@ -176,7 +176,7 @@ for i in range(stages):
 # # Xtrain = Xtrain/np.max(Xtrain)
 # Ytrain = np.array(rrv)
 # # Ytrain = Ytrain/np.max(Ytrain)
-# # Ytrain = np.array(rrc)
+# # Ytrain = np.array(rrd)
 #
 #
 # model = Sequential()

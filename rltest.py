@@ -26,17 +26,20 @@ from descartes import PolygonPatch
 from shapely.geometry import Point, LineString, Polygon
 import utils
 # import random
-# import time
-import itertools
+import time
+# import itertools
 import pickle
+import os
 from os import listdir
 from os.path import isfile, join
 import pandas as pd
-from multiprocessing import Pool as ThreadPool
-import multiprocessing as mp
+# from multiprocessing import Pool as ThreadPool
+# import multiprocessing as mp
 im.reload(utils)
 
 figsize = (25,15)
+
+os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3"
 
 if torch.cuda.is_available():
     dev = "cuda:0"
@@ -61,7 +64,7 @@ G = utils.getGraphWithSetting(city)
 #     G = pickle.load(f)
 
 directory = '/data/risk_datasets/mixed_data_old_no_dev/'
-directory = 'dataset_champaign_max5risk/'
+directory = 'dataset_'+city+'_max5risk/'
 filename = 'res'
 file = directory + filename
 onlyfiles = [f for f in listdir(directory) if isfile(join(directory, f)) and f[0] is 'r']
@@ -82,9 +85,9 @@ for file in onlyfiles:
     risks.extend(ri)
 
 
-risks = [risks[i] for i in range(len(risks)) if len(routes[i]) > 0]
-routes = [routes[i] for i in range(len(routes)) if len(routes[i]) > 0]
-deltas = [deltas[i] for i in range(len(deltas)) if len(routes[i]) > 0]
+# risks = [risks[i] for i in range(len(risks)) if len(routes[i]) > 0]
+# routes = [routes[i] for i in range(len(routes)) if len(routes[i]) > 0]
+# deltas = [deltas[i] for i in range(len(deltas)) if len(routes[i]) > 0]
 
 data_size = len(risks)
 split = 0.7
@@ -96,7 +99,7 @@ oyp = []
 dxp = []
 dyp = []
 rrv = []
-rrc = []
+rrd = []
 
 rp = []
 rxp = []
@@ -106,42 +109,17 @@ risks_treated = [risks[i] for i in range(data_size) if risks[i] < 2.5e9]
 threshold = np.mean(risks_treated)
 r_threshold = 2.5e9
 d_threshold = 500
+deltas_threshold = np.percentile(deltas, 99.9)
 
-if city is 'champaign':
-    depot_local = utils.depot_champaign
-
-elif city is 'chicago':
-    depot_local = utils.depot_chicago
-
-elif city is 'janeiro':
-    depot_local = utils.depot_rio
-
-else:
-    raise Exception('invalid city')
-
-# pool_size = 62
-# pool = ThreadPool(pool_size)
-# rf = [routes[i][0] for i in range(len(routes))]
-# rs = [risks[i] for i in range(len(risks))]
-# # route = rf[-1]
-# results = pool.starmap(utils.getNominalRisk, zip(rf, rs, itertools.repeat(G), itertools.repeat(city)))
-# pool.close()
-#
-# with open(directory + 'nom_risks.pkl', 'wb') as f:
-#     pickle.dump(results, f)
-# if city == 'champaign':
-#     with open(directory + 'nom_risks.pkl', 'rb') as f:
-#         results = pickle.load(f)
-#
-#     deltas = zip(*results)
-
+depot_local = utils.getDepotLocation(city)
+depot_node = ox.get_nearest_nodes(G,[depot_local[1]],[depot_local[0]])
 
 for i in range(data_size):
-    o = routes[i][0].orig
-    d = routes[i][0].dest
-    r = routes[i][0].optNode
+    o = routes[i].orig
+    d = routes[i].dest
+    r = routes[i].optNode
     dist = gd.distance((G.nodes[r]['y'], G.nodes[r]['x']), depot_local).m
-    if len(routes[i]) > 0 and r_threshold > risks[i] > 0.0 and dist > d_threshold:
+    if len(routes[i].nodes) > 0 and deltas[i] < deltas_threshold and dist > d_threshold:
         oxp.append(G.nodes[o]['x'])
         oyp.append(G.nodes[o]['y'])
         dxp.append(G.nodes[d]['x'])
@@ -152,7 +130,7 @@ for i in range(data_size):
         ryp.append(G.nodes[r]['y'])
 
         rrv.append(risks[i])
-        rrc.append(risks[i])
+        rrd.append(deltas[i])
 
 ur = 1.0
 lr = -0.0
@@ -163,6 +141,8 @@ uby = np.maximum(np.max(oyp), np.max(dyp))
 lby = np.minimum(np.min(oyp), np.min(dyp))
 ubr = np.maximum(np.max(rrv), np.max(rrv))
 lbr = np.minimum(np.min(rrv), np.min(rrv))
+ubd = np.maximum(np.max(rrv), np.max(rrv))
+lbd = np.minimum(np.min(rrd), np.min(rrd))
 oxp = [utils.mapRange(x, lbx, ubx, lr, ur) for x in oxp]
 oyp = [utils.mapRange(x, lby, uby, lr, ur) for x in oyp]
 dxp = [utils.mapRange(x, lbx, ubx, lr, ur) for x in dxp]
@@ -170,19 +150,24 @@ dyp = [utils.mapRange(x, lby, uby, lr, ur) for x in dyp]
 rrv = [utils.mapRange(x, lbr, ubr, lr, ur) for x in rrv]
 rxp = [utils.mapRange(x, lbx, ubx, lr, ur) for x in rxp]
 ryp = [utils.mapRange(x, lby, uby, lr, ur) for x in ryp]
+ddv = [utils.mapRange(x, lbd, ubd, lr, ur) for x in rrd]
 
-coord_bounds = {'ubx': ubx, 'lbx': lbx, 'uby': uby, 'lby': lby, 'ur': ur, 'lr': lr}
+coord_bounds = {'ubx': ubx, 'lbx': lbx, 'uby': uby, 'lby': lby, 'ur': ur, 'lr': lr, 'lbd': lbd, 'ubd': ubd}
 
+# df = pd.DataFrame(list(zip(oxp, oyp, dxp, dyp, rrv)),
+#                   columns=['X_origin', 'Y_origin', 'X_destination', 'Y_destination', 'risk'])
+# Inputs = ['X_origin', 'Y_origin', 'X_destination', 'Y_destination']
+# Outputs = ['risk']
 df = pd.DataFrame(list(zip(oxp, oyp, dxp, dyp, rrv)),
-                  columns=['X_origin', 'Y_origin', 'X_destination', 'Y_destination', 'risk'])
+                  columns=['X_origin', 'Y_origin', 'X_destination', 'Y_destination', 'deltas'])
 Inputs = ['X_origin', 'Y_origin', 'X_destination', 'Y_destination']
-Outputs = ['risk']
+Outputs = ['deltas']
 
 xo = df['X_origin'].values
 yo = df['Y_origin'].values
 xd = df['X_destination'].values
 yd = df['Y_destination'].values
-r = df['risk'].values
+r = df['deltas'].values
 
 inp_stack = torch.tensor(df[Inputs].values, dtype=torch.float64)
 out_stack = torch.tensor(df[Outputs].values, dtype=torch.float32)
@@ -198,6 +183,7 @@ test_outputs = out_stack[total_data_entries - test_data:total_data_entries].to(d
 
 rxpt = rxp[total_data_entries - test_data:total_data_entries]
 rypt = ryp[total_data_entries - test_data:total_data_entries]
+
 
 
 class Model(nn.Module):
@@ -224,20 +210,20 @@ class Model(nn.Module):
 
 
 layers = []
-for i in range(10):
-    layers.append(512)
+for i in range(2):
+    layers.append(128)
 
 # layers.append(32)
 
-model = Model(4, 1, layers, p=0.2)
+model = Model(4, 1, layers, p=0.7)
 model = nn.DataParallel(model)
 model.to(device)
-epochs = 500
+epochs = 5000
 num_stints = 1
 aggregated_losses = []
 
 loss_function = nn.MSELoss().to(device=device)
-optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+optimizer = torch.optim.Adam(model.parameters(), lr=0.0001)
 
 # checkpoint = torch.load('checkpoints/mdl_10_512_max5risk.pth')
 # model.load_state_dict(checkpoint['model_state_dict'])
@@ -250,6 +236,7 @@ optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 model.train()
 for k in range(num_stints):
     print('Stint', k)
+    start = time.time()
     for i in range(epochs):
         i += 1
         y_pred = model(train_inputs.float())
@@ -257,7 +244,10 @@ for k in range(num_stints):
         aggregated_losses.append(single_loss)
 
         if i % 25 == 1:
-            print(f'epoch: {i:3} loss: {single_loss.item():10.8f}')
+            end = time.time()
+            elapsed = end - start
+            print(f'epoch: {i:3} loss: {single_loss.item():10.8f} time: {elapsed:10.3f}')
+            start = time.time()
 
         optimizer.zero_grad()
         single_loss.backward()
@@ -271,10 +261,12 @@ for k in range(num_stints):
         'loss': single_loss,
     }, 'checkpoints/mdl.pth')
 
+
 print(f'epoch: {i:3} loss: {single_loss.item():10.10f}')
 
 fig = plt.figure(figsize=figsize, dpi=100)
 plt.plot(aggregated_losses, label="Training Loss", linewidth=3)
+# plt.ylim((0, np.percentile(aggregated_losses,90).cpu().detach().numpy()))
 plt.xlabel('Epoch')
 plt.ylabel('Training Loss')
 plt.title(directory)
@@ -288,9 +280,9 @@ with torch.no_grad():
 predictions = predictions.cpu().numpy()
 reals = test_outputs.cpu().numpy()
 
-test_size = 10
+test_size = len(reals)
 
-for i in range(test_size):
+for i in range(10):
     pred = predictions[i]
     print(pred, reals[i], np.abs(pred - reals[i]))
 
@@ -298,6 +290,11 @@ idxs = [i for i in range(len(reals)) if reals[i] > 0]
 rrvp = [reals[i] for i in idxs]
 rxpp = [rxpt[i] for i in idxs]
 rypp = [rypt[i] for i in idxs]
+
+# preds = [np.abs(predictions[i][0]) for i in range(len(rrvp))]
+# perf = [np.abs(predictions[i][0] - rrvp[i]) for i in range(len(rrvp))]
+# perf_pct = [predictions[i][0] / rrvp[i] for i in range(len(rrvp))]
+# perf_mse = [(predictions[i][0] - rrvp[i]) ** 2 for i in range(len(rrvp))]
 
 preds = [np.abs(predictions[i][0]) for i in range(len(rrvp))]
 perf = [np.abs(predictions[i][0] - rrvp[i]) for i in range(len(rrvp))]
@@ -313,18 +310,18 @@ perf_mse = np.mean(perf_mse)
 fig = plt.figure(figsize=figsize, dpi=100)
 ax = Axes3D(fig)
 ax.scatter(rxpp, rypp, rrvp, marker='o', s=10, c='blue', alpha=0.1)
-# ax.scatter(rxpp, rypp, preds, marker='o', s=10, c='red', alpha=0.1)
-ax.view_init(elev=30., azim=40)
-ax.set_zlim(lr, ur)
+ax.scatter(rxpp, rypp, preds, marker='o', s=10, c='red', alpha=0.1)
+ax.view_init(elev=90., azim=270)
+# ax.set_zlim(lr, 0.1)
 ax.set_xlabel('$X$')
 ax.set_ylabel('$Y$')
 ax.set_zlabel('$Risk$')
 ax.set_title(directory)
 plt.show()
 
-print(np.median(perf))
-print(perf_mse)
-print(np.max(np.abs(perf)))
+print('median', np.median(perf))
+print('mse', perf_mse)
+print('max e', np.max(np.abs(perf)))
 
 ## plot a heatmap of risks
 im.reload(utils)
@@ -336,99 +333,91 @@ ax221 = fig.add_subplot(221)
 ax222 = fig.add_subplot(222)
 ax223 = fig.add_subplot(223)
 ax224 = fig.add_subplot(224)
-c = 0.15
+c = None
 rp = ur
 rm = lr
-vmin = lr
-vmax = 0.6
+vmin = None
+vmax = 0.1
 predictions = utils.TwoDPredictions(model, rm, rp, device)
-sns.heatmap(predictions, square=True, xticklabels=False, yticklabels=False, ax=ax221, vmin=vmin, vmax=vmax, cbar=True,
-            center=c, cbar_kws={'label': 'Risk'})
+sns.heatmap(predictions, square=True, xticklabels=False, yticklabels=False, ax=ax221, cbar=True,
+            center=c, cbar_kws={'label': 'Risk'}, vmin=vmin)
 ax221.set_xlabel('Longitude')
 ax221.set_ylabel('Latitude')
 predictions = utils.TwoDPredictions(model, rp, rp, device)
-sns.heatmap(predictions, square=True, xticklabels=False, yticklabels=False, ax=ax222, vmin=vmin, vmax=vmax, cbar=True,
-            center=c, cbar_kws={'label': 'Risk'})
+sns.heatmap(predictions, square=True, xticklabels=False, yticklabels=False, ax=ax222, cbar=True,
+            center=c, cbar_kws={'label': 'Risk'}, vmin=vmin)
 ax222.set_xlabel('Longitude')
 ax222.set_ylabel('Latitude')
 predictions = utils.TwoDPredictions(model, rm, rm, device)
-sns.heatmap(predictions, square=True, xticklabels=False, yticklabels=False, ax=ax223, vmin=vmin, vmax=vmax, cbar=True,
-            center=c, cbar_kws={'label': 'Risk'})
+sns.heatmap(predictions, square=True, xticklabels=False, yticklabels=False, ax=ax223, cbar=True,
+            center=c, cbar_kws={'label': 'Risk'}, vmin=vmin)
 ax223.set_xlabel('Longitude')
 ax223.set_ylabel('Latitude')
 predictions = utils.TwoDPredictions(model, rp, rm, device)
-sns.heatmap(predictions, square=True, xticklabels=False, yticklabels=False, ax=ax224, vmin=vmin, vmax=vmax, cbar=True,
-            center=c, cbar_kws={'label': 'Risk'})
+sns.heatmap(predictions, square=True, xticklabels=False, yticklabels=False, ax=ax224, cbar=True,
+            center=c, cbar_kws={'label': 'Risk'}, vmin=vmin)
 ax224.set_xlabel('Longitude')
 ax224.set_ylabel('Latitude')
 plt.show()
 
-# #now plot on top of graph
-# im.reload(utils)
-# city = 'chicago'
-# Gc = utils.getGraphWithSetting(city)
-#
-# nodes, edges = ox.graph_to_gdfs(G, nodes=True, edges=True)
-# fig = plt.figure(figsize=(15, 15), dpi=100)
-# ax221 = fig.add_subplot(221)
-# ax222 = fig.add_subplot(222)
-# ax223 = fig.add_subplot(223)
-# ax224 = fig.add_subplot(224)
-#
-# ns = 5
-#
-# G = Gc
-#
-# predictions, node_list = utils.InferNodeRiskMultiple(G, nodes.index, 0.0, 1.0, model, device, coord_bounds)
-# nx.set_node_attributes(G, {nodes.index[i]: predictions[i][0] for i in range(len(predictions))}, name='r')
-# nc = ox.plot.get_node_colors_by_attr(G, attr='r')
-# ox.plot_graph(G, ax = ax221, node_color=nc, node_size=ns, edge_linewidth=0.5, figsize=(15,15),
-#                         bgcolor='white', show=False)
-#
-# G = Gc
-#
-# predictions, node_list = utils.InferNodeRiskMultiple(G, nodes.index, 1.0, 1.0, model, device, coord_bounds)
-# nx.set_node_attributes(G, {nodes.index[i]: predictions[i][0] for i in range(len(predictions))}, name='r')
-# nc = ox.plot.get_node_colors_by_attr(G, attr='r')
-# ox.plot_graph(G, ax = ax222, node_color=nc, node_size=ns, edge_linewidth=0.5, figsize=(15,15),
-#                         bgcolor='white', show=False)
-#
-# G = Gc
-#
-# predictions, node_list = utils.InferNodeRiskMultiple(G, nodes.index, 0.0, 0.0, model, device, coord_bounds)
-# nx.set_node_attributes(G, {nodes.index[i]: predictions[i][0] for i in range(len(predictions))}, name='r')
-# nc = ox.plot.get_node_colors_by_attr(G, attr='r')
-# ox.plot_graph(G, ax = ax223, node_color=nc, node_size=ns, edge_linewidth=0.5, figsize=(15,15),
-#                         bgcolor='white', show=False)
-#
-# G = Gc
-#
-# predictions, node_list = utils.InferNodeRiskMultiple(G, nodes.index, 1.0, 0.0, model, device, coord_bounds)
-# nx.set_node_attributes(G, {nodes.index[i]: predictions[i][0] for i in range(len(predictions))}, name='r')
-# nc = ox.plot.get_node_colors_by_attr(G, attr='r')
-# ox.plot_graph(G, ax = ax224, node_color=nc, node_size=ns, edge_linewidth=0.5, figsize=(15,15),
-#                         bgcolor='white', show=False)
-#
-#
-# plt.show()
+#now plot on top of graph
+im.reload(utils)
+Gc = utils.getGraphWithSetting(city)
 
-# #plot the isochrones
+nodes, edges = ox.graph_to_gdfs(G, nodes=True, edges=True)
+fig = plt.figure(figsize=(15, 15), dpi=100)
+ax221 = fig.add_subplot(221)
+ax222 = fig.add_subplot(222)
+ax223 = fig.add_subplot(223)
+ax224 = fig.add_subplot(224)
+
+ns = 20
+
+G = Gc
+
+predictions, node_list = utils.InferNodeRiskMultiple(G, nodes.index, 0.0, 1.0, model, device, coord_bounds)
+nx.set_node_attributes(G, {nodes.index[i]: predictions[i][0] for i in range(len(predictions))}, name='r')
+nc = ox.plot.get_node_colors_by_attr(G, attr='r')
+ox.plot_graph(G, ax = ax221, node_color=nc, node_size=ns, edge_linewidth=0.5, figsize=(15,15),
+                        bgcolor='white', show=False, close=False)
+ax221 = utils.scatterGraph(depot_node, G, ax221, color='blue')
+
+G = Gc
+
+predictions, node_list = utils.InferNodeRiskMultiple(G, nodes.index, 1.0, 1.0, model, device, coord_bounds)
+nx.set_node_attributes(G, {nodes.index[i]: predictions[i][0] for i in range(len(predictions))}, name='r')
+nc = ox.plot.get_node_colors_by_attr(G, attr='r')
+ox.plot_graph(G, ax = ax222, node_color=nc, node_size=ns, edge_linewidth=0.5, figsize=(15,15),
+                        bgcolor='white', show=False, close=False)
+ax222 = utils.scatterGraph(depot_node, G, ax222, color='blue')
+
+G = Gc
+
+predictions, node_list = utils.InferNodeRiskMultiple(G, nodes.index, 0.0, 0.0, model, device, coord_bounds)
+nx.set_node_attributes(G, {nodes.index[i]: predictions[i][0] for i in range(len(predictions))}, name='r')
+nc = ox.plot.get_node_colors_by_attr(G, attr='r')
+ox.plot_graph(G, ax = ax223, node_color=nc, node_size=ns, edge_linewidth=0.5, figsize=(15,15),
+                        bgcolor='white', show=False, close=False)
+ax223 = utils.scatterGraph(depot_node, G, ax223, color='blue')
+
+G = Gc
+
+predictions, node_list = utils.InferNodeRiskMultiple(G, nodes.index, 1.0, 0.0, model, device, coord_bounds)
+nx.set_node_attributes(G, {nodes.index[i]: predictions[i][0] for i in range(len(predictions))}, name='r')
+nc = ox.plot.get_node_colors_by_attr(G, attr='r')
+ox.plot_graph(G, ax = ax224, node_color=nc, node_size=ns, edge_linewidth=0.5, figsize=(15,15),
+                        bgcolor='white', show=False, close=False)
+ax224 = utils.scatterGraph(depot_node, G, ax224, color='blue')
+
+
+plt.show()
+
+#plot the isochrones
 network_type = 'drive'
 trip_times = [5, 10, 15, 20] #in minutes
 travel_speed = 15 #driving speed in km/hour
-city = 'chicago'
 G = utils.getGraphWithSetting(city)
-if city is 'champaign':
-    depot_local = utils.depot_champaign
-
-elif city is 'chicago':
-    depot_local = utils.depot_chicago
-
-elif city is 'janeiro':
-    depot_local = utils.depot_rio
-
-else:
-    raise Exception('invalid city')
+depot_local = utils.getDepotLocation(city)
 gdf_nodes = ox.graph_to_gdfs(G, edges=False)
 center_node = ox.get_nearest_node(G, depot_local)
 G = ox.project_graph(G)
@@ -448,27 +437,22 @@ for trip_time in sorted(trip_times, reverse=True):
 
 # #plot isochrone and heatmap side by side
 
-im.reload(utils)
-fig = plt.figure(figsize=figsize, dpi=100)
-suptitle_font = {'fontsize': 40, 'fontweight': 'normal', 'y': 0.98}
-tts = 'Risk Assessment for Edge Destinations'+directory
-fig.suptitle('Risk Assessment for Edge Destinations', **suptitle_font)
-ax211 = fig.add_subplot(121)
-ax212 = fig.add_subplot(122)
-c = 0.15
-rp = 0.0
-rm = 0.0
-vmin = lr
-vmax = 0.6
-predictions = utils.TwoDPredictions(model, rm, rp, device)
-sns.heatmap(predictions, square=True, xticklabels=False, yticklabels=False, ax=ax211, vmin=vmin, vmax=vmax, cbar=False,
-            center=c)
-
-fig2, ax = ox.plot_graph(G, ax=ax212, show=False, close=False, edge_color="k", edge_alpha=0.2,
-                        node_size=0, bgcolor="#ffffff")
-for polygon, fc in zip(isochrone_polys, iso_colors):
-    patch = PolygonPatch(polygon, fc=fc, ec='none', alpha=0.4, zorder=-1)
-    ax.add_patch(patch)
-plt.show()
+# im.reload(utils)
+# fig = plt.figure(figsize=figsize, dpi=100)
+# suptitle_font = {'fontsize': 40, 'fontweight': 'normal', 'y': 0.98}
+# tts = 'Risk Assessment for Edge Destinations'+directory
+# fig.suptitle('Risk Assessment for Edge Destinations', **suptitle_font)
+# ax211 = fig.add_subplot(121)
+# ax212 = fig.add_subplot(122)
+# predictions = utils.TwoDPredictions(model, rm, rp, device)
+# sns.heatmap(predictions, square=True, xticklabels=False, yticklabels=False, ax=ax211, vmin=vmin, cbar=False,
+#             center=c)
+#
+# fig2, ax = ox.plot_graph(G, ax=ax212, show=False, close=False, edge_color="k", edge_alpha=0.2,
+#                         node_size=0, bgcolor="#ffffff")
+# for polygon, fc in zip(isochrone_polys, iso_colors):
+#     patch = PolygonPatch(polygon, fc=fc, ec='none', alpha=0.4, zorder=-1)
+#     ax.add_patch(patch)
+# plt.show()
 
 

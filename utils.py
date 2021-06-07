@@ -20,6 +20,7 @@ coords_2 = (52.406374, 16.9251681)
 depot = (40.11237526379417, -88.24327192934085)
 depot_champaign = (40.11237526379417, -88.24327192934085)
 depot_chicago = (41.84477746620278, -87.68189749403619)
+depot_dtchicago = (41.88325889448088, -87.66564849555748)
 
 figsize = (25, 15)
 
@@ -178,9 +179,9 @@ class iRoute:
         self.x = x  # position
         self.y = y
         self.t = t  # time for transition
-        # self.optNode = computeOptRdvNode(x, y, t, city)
-        # self.tr = self.t[self.optNode]
-        # self.optNode = self.route[self.optNode]
+        self.optNode = computeOptRdvNode(x, y, t, city)
+        self.tr = self.t[self.optNode]
+        self.optNode = self.route[self.optNode]
         self.pos = pos  # position (node index)
         self.edge_timer = 0.0
         self.local_time = 0.0
@@ -490,7 +491,7 @@ def routeRiskSingle(G, o, d, Edetours, t_0, nroutes, city):
         print(datetime.datetime.now(), "Finished batch of risk computation in", elapsed)
         delta = risk - getSingleRouteCost(o, d, G, city)
         # pprint(locals())
-        return routes, risk, delta
+        return routes[0], risk, delta
 
     else:
         return
@@ -510,6 +511,8 @@ def fastBigData(G, city, nroutes=100, npairs=100, Edetours=1, pool_size=cpus):
     # x_o = [G.nodes[node]['x'] for node in orig_b]
     # y_d = [G.nodes[node]['y'] for node in dest_b]
     # x_d = [G.nodes[node]['x'] for node in dest_b]
+
+    print('Selecting good routes')
 
     idxs = [i for i in range(npairs) if len(ox.shortest_path(G, orig_b[i], dest_b[i], weight="travel_time")) > 5]
 
@@ -587,17 +590,7 @@ def costFun(d, t):
 def computeOptRdvNode(x, y, t, city):
     # pprint(locals())
     # print('computeOptRdvNode', city)
-    if city == 'champaign':
-        depot_local = depot_champaign
-
-    elif city == 'chicago':
-        depot_local = depot_chicago
-
-    elif city == 'janeiro':
-        depot_local = depot_rio
-
-    else:
-        raise Exception(city, ': invalid city')
+    depot_local = getDepotLocation(city)
 
     n = len(x) - 1
     E = []
@@ -767,7 +760,7 @@ def collectDataMP(routes, risks, G, data_size, d_threshold, r_threshold, pool_si
     return results
 
 
-def TwoDPredictions(model, destx, desty, device, numticks=1000, lr=0.0, ur=1.0):
+def TwoDPredictions(model, destx, desty, device, numticks=100, lr=0.0, ur=1.0):
     xvals = np.tile(np.linspace(lr, ur, numticks), numticks)
     yvals = np.linspace(lr, ur, numticks)
     yvals = np.transpose([yvals] * numticks)
@@ -844,6 +837,14 @@ def getGraphWithSetting(city):
     elif city is 'janeiro':
         places = ['Rio de Janeiro, Rio de Janeiro, Brazil']
         G = ox.graph_from_place(places, network_type="drive", simplify=True)
+        G = ox.add_edge_speeds(G)
+        G = ox.add_edge_travel_times(G)
+        G = ox.bearing.add_edge_bearings(G)
+        G = ox.utils_graph.get_largest_component(G, strongly=True)
+
+    elif city is 'dtchicago':
+        places = ['201 E Randolph St, Chicago, IL, 60602']
+        G = ox.graph_from_address(places, network_type="drive", simplify=True, dist = 5000)
         G = ox.add_edge_speeds(G)
         G = ox.add_edge_travel_times(G)
         G = ox.bearing.add_edge_bearings(G)
@@ -1124,7 +1125,36 @@ def getDepotLocation(city):
     elif city == 'janeiro':
         depot_local = depot_rio
 
+    elif city == 'dtchicago':
+        depot_local = depot_dtchicago
+
     else:
-        raise Exception(city, ': invalid city')
+        print('!!!!!!!!! No preset city available, returning NONE !!!!!!!!!')
+        return None
 
     return depot_local
+
+def plotCityAndDepot(G=None,city='champaign'):
+    if G is None:
+        G = getGraphWithSetting(city)
+
+    depot_local = getDepotLocation(city)
+    if depot_local is None:
+        depot_local = CreateDepotLocation(G)
+        print(depot_local)
+
+    depot_node = ox.get_nearest_nodes(G, [depot_local[1]], [depot_local[0]])
+
+    fig, ax = ox.plot_graph(G, node_size=1, node_color="#a3a3a3", edge_color="#a3a3a3", edge_linewidth=0.5,
+                            bgcolor="#ffffff", show=False, dpi=600, figsize=(20, 20));
+    ax = scatterGraph(depot_node, G, ax, color='blue')
+    plt.show()
+
+def CreateDepotLocation(G):
+    gdf_nodes, gdf_edges = ox.graph_to_gdfs(G)
+    center_lat = np.mean(gdf_nodes.y.values)
+    center_lon = np.mean(gdf_nodes.x.values)
+    return (center_lat, center_lon)
+
+
+
