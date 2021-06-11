@@ -21,6 +21,10 @@ depot = (40.11237526379417, -88.24327192934085)
 depot_champaign = (40.11237526379417, -88.24327192934085)
 depot_chicago = (41.84477746620278, -87.68189749403619)
 depot_dtchicago = (41.88325889448088, -87.66564849555748)
+depot_rio = (-22.922332034177217, -43.19078181012658)
+
+depot_color = 'green'
+dest_color = 'cyan'
 
 figsize = (25, 15)
 
@@ -760,7 +764,7 @@ def collectDataMP(routes, risks, G, data_size, d_threshold, r_threshold, pool_si
     return results
 
 
-def TwoDPredictions(model, destx, desty, device, numticks=100, lr=0.0, ur=1.0):
+def TwoDPredictions(model, destx, desty, device, numticks=10, lr=0.0, ur=1.0):
     xvals = np.tile(np.linspace(lr, ur, numticks), numticks)
     yvals = np.linspace(lr, ur, numticks)
     yvals = np.transpose([yvals] * numticks)
@@ -1087,7 +1091,7 @@ def plotRoutesAndOptNode(G, city, nroutes=100, Edetours=1):
     return nodes, times
 
 
-def plotNodeEnergies(nodes, times, G, city, Eo):
+def plotNodeEnergies(nodes, times, G, city):
     depot_local = getDepotLocation(city)
 
     tr = np.cumsum(times)
@@ -1155,6 +1159,18 @@ def CreateDepotLocation(G):
     center_lat = np.mean(gdf_nodes.y.values)
     center_lon = np.mean(gdf_nodes.x.values)
     return (center_lat, center_lon)
+
+def UnitToLatLon(x, y, coord_bounds):
+    lon = mapRange(x, coord_bounds['lr'], coord_bounds['ur'], coord_bounds['lbx'], coord_bounds['ubx'])
+    lat = mapRange(y, coord_bounds['lr'], coord_bounds['ur'], coord_bounds['lby'], coord_bounds['uby'])
+    return lon, lat
+
+def LatLonToUnit(lat, lon, coord_bounds):
+    y = mapRange(lat, coord_bounds['lby'], coord_bounds['uby'], coord_bounds['lr'], coord_bounds['ur'])
+    x = mapRange(lon, coord_bounds['lbx'], coord_bounds['ubx'], coord_bounds['lr'], coord_bounds['ur'])
+    return x, y
+
+
 
 
 

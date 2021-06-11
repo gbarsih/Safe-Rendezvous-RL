@@ -54,7 +54,7 @@ device = torch.device(dev)
 #   print("Name of the Cuda Device: ", torch.cuda.get_device_name())
 #   print("GPU Computational Capablity: ", torch.cuda.get_device_capability())
 
-city = 'champaign'
+city = 'chicago' # chicago, dtchicago, champaign
 G = utils.getGraphWithSetting(city)
 
 # with open('CU_graph.pkl', 'wb') as f:
@@ -63,7 +63,7 @@ G = utils.getGraphWithSetting(city)
 # with open('CU_graph.pkl', 'rb') as f:
 #     G = pickle.load(f)
 
-directory = '/data/risk_datasets/mixed_data_old_no_dev/'
+# directory = '/data/risk_datasets/mixed_data_old_no_dev/'
 directory = 'dataset_'+city+'_max5risk/'
 filename = 'res'
 file = directory + filename
@@ -108,8 +108,8 @@ ryp = []
 risks_treated = [risks[i] for i in range(data_size) if risks[i] < 2.5e9]
 threshold = np.mean(risks_treated)
 r_threshold = 2.5e9
-d_threshold = 500
-deltas_threshold = np.percentile(deltas, 99.9)
+d_threshold = 1000
+deltas_threshold = np.percentile(deltas, 99)
 
 depot_local = utils.getDepotLocation(city)
 depot_node = ox.get_nearest_nodes(G,[depot_local[1]],[depot_local[0]])
@@ -119,7 +119,7 @@ for i in range(data_size):
     d = routes[i].dest
     r = routes[i].optNode
     dist = gd.distance((G.nodes[r]['y'], G.nodes[r]['x']), depot_local).m
-    if len(routes[i].nodes) > 0 and deltas[i] < deltas_threshold and dist > d_threshold:
+    if len(routes[i].nodes) > 0 and 0 < deltas[i] < deltas_threshold and dist > d_threshold:
         oxp.append(G.nodes[o]['x'])
         oyp.append(G.nodes[o]['y'])
         dxp.append(G.nodes[d]['x'])
@@ -141,7 +141,7 @@ uby = np.maximum(np.max(oyp), np.max(dyp))
 lby = np.minimum(np.min(oyp), np.min(dyp))
 ubr = np.maximum(np.max(rrv), np.max(rrv))
 lbr = np.minimum(np.min(rrv), np.min(rrv))
-ubd = np.maximum(np.max(rrv), np.max(rrv))
+ubd = np.maximum(np.max(rrd), np.max(rrd))
 lbd = np.minimum(np.min(rrd), np.min(rrd))
 oxp = [utils.mapRange(x, lbx, ubx, lr, ur) for x in oxp]
 oyp = [utils.mapRange(x, lby, uby, lr, ur) for x in oyp]
@@ -152,14 +152,27 @@ rxp = [utils.mapRange(x, lbx, ubx, lr, ur) for x in rxp]
 ryp = [utils.mapRange(x, lby, uby, lr, ur) for x in ryp]
 ddv = [utils.mapRange(x, lbd, ubd, lr, ur) for x in rrd]
 
+# plt.plot(ddv); plt.show()
+#
+# fig = plt.figure(figsize=figsize, dpi=100)
+# ax = Axes3D(fig)
+# ax.scatter(rxp, ryp, ddv, marker='o', s=10, c='blue', alpha=0.1)
+# ax.view_init(elev=90., azim=270)
+# # ax.set_zlim(lr, 0.1)
+# ax.set_xlabel('$X$')
+# ax.set_ylabel('$Y$')
+# ax.set_zlabel('$Risk$')
+# ax.set_title(directory)
+# plt.show()
+
 coord_bounds = {'ubx': ubx, 'lbx': lbx, 'uby': uby, 'lby': lby, 'ur': ur, 'lr': lr, 'lbd': lbd, 'ubd': ubd}
 
 # df = pd.DataFrame(list(zip(oxp, oyp, dxp, dyp, rrv)),
 #                   columns=['X_origin', 'Y_origin', 'X_destination', 'Y_destination', 'risk'])
 # Inputs = ['X_origin', 'Y_origin', 'X_destination', 'Y_destination']
 # Outputs = ['risk']
-df = pd.DataFrame(list(zip(oxp, oyp, dxp, dyp, rrv)),
-                  columns=['X_origin', 'Y_origin', 'X_destination', 'Y_destination', 'deltas'])
+df = pd.DataFrame(list(zip(oxp, oyp, dxp, dyp, rrv, ddv)),
+                  columns=['X_origin', 'Y_origin', 'X_destination', 'Y_destination', 'risks', 'deltas'])
 Inputs = ['X_origin', 'Y_origin', 'X_destination', 'Y_destination']
 Outputs = ['deltas']
 
@@ -171,6 +184,8 @@ r = df['deltas'].values
 
 inp_stack = torch.tensor(df[Inputs].values, dtype=torch.float64)
 out_stack = torch.tensor(df[Outputs].values, dtype=torch.float32)
+
+# plt.plot(out_stack); plt.show()
 
 total_data_entries = len(r)
 test_data = int(total_data_entries * .1)
@@ -208,22 +223,26 @@ class Model(nn.Module):
         x = self.layers(inputs)
         return x
 
+n_l = 2
+n_n = 128
+d_p = 0.8
+lr = 0.001
 
 layers = []
-for i in range(2):
-    layers.append(128)
+for i in range(n_l):
+    layers.append(n_n) # 32-128 range with low dropout (0.1-0.4) seems to work the best
 
 # layers.append(32)
 
-model = Model(4, 1, layers, p=0.7)
+model = Model(4, 1, layers, p=d_p)
 model = nn.DataParallel(model)
 model.to(device)
-epochs = 5000
+epochs = 20000
 num_stints = 1
 aggregated_losses = []
 
 loss_function = nn.MSELoss().to(device=device)
-optimizer = torch.optim.Adam(model.parameters(), lr=0.0001)
+optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
 # checkpoint = torch.load('checkpoints/mdl_10_512_max5risk.pth')
 # model.load_state_dict(checkpoint['model_state_dict'])
@@ -243,7 +262,7 @@ for k in range(num_stints):
         single_loss = loss_function(y_pred, train_outputs)
         aggregated_losses.append(single_loss)
 
-        if i % 25 == 1:
+        if i % 100 == 1:
             end = time.time()
             elapsed = end - start
             print(f'epoch: {i:3} loss: {single_loss.item():10.8f} time: {elapsed:10.3f}')
@@ -300,6 +319,7 @@ preds = [np.abs(predictions[i][0]) for i in range(len(rrvp))]
 perf = [np.abs(predictions[i][0] - rrvp[i]) for i in range(len(rrvp))]
 perf_pct = [predictions[i][0] / rrvp[i] for i in range(len(rrvp))]
 perf_mse = [(predictions[i][0] - rrvp[i]) ** 2 for i in range(len(rrvp))]
+perf_mae = [np.abs(predictions[i][0] - rrvp[i]) for i in range(len(rrvp))]
 
 pu = np.max(perf)
 pl = np.min(perf)
@@ -311,17 +331,14 @@ fig = plt.figure(figsize=figsize, dpi=100)
 ax = Axes3D(fig)
 ax.scatter(rxpp, rypp, rrvp, marker='o', s=10, c='blue', alpha=0.1)
 ax.scatter(rxpp, rypp, preds, marker='o', s=10, c='red', alpha=0.1)
-ax.view_init(elev=90., azim=270)
-# ax.set_zlim(lr, 0.1)
+ax.view_init(elev=00., azim=270)
+# ax.set_zlim(lr, 0.5)
 ax.set_xlabel('$X$')
 ax.set_ylabel('$Y$')
 ax.set_zlabel('$Risk$')
 ax.set_title(directory)
 plt.show()
 
-print('median', np.median(perf))
-print('mse', perf_mse)
-print('max e', np.max(np.abs(perf)))
 
 ## plot a heatmap of risks
 im.reload(utils)
@@ -334,30 +351,44 @@ ax222 = fig.add_subplot(222)
 ax223 = fig.add_subplot(223)
 ax224 = fig.add_subplot(224)
 c = None
-rp = ur
-rm = lr
-vmin = None
+rp = 0.75
+rm = 0.25
+vmin = 0.0
 vmax = 0.1
-predictions = utils.TwoDPredictions(model, rm, rp, device)
+numticks = 1000
+depot_x, depot_y = utils.LatLonToUnit(depot_local[0], depot_local[1], coord_bounds)
+predictions = utils.TwoDPredictions(model, rm, rp, device, numticks)
 sns.heatmap(predictions, square=True, xticklabels=False, yticklabels=False, ax=ax221, cbar=True,
             center=c, cbar_kws={'label': 'Risk'}, vmin=vmin)
+ax221.scatter(rm*numticks, (ur-rp)*numticks, s=100, color=utils.dest_color)
+ax221.scatter(depot_x*numticks, (ur-depot_y)*numticks, s=100, color=utils.depot_color)
 ax221.set_xlabel('Longitude')
 ax221.set_ylabel('Latitude')
-predictions = utils.TwoDPredictions(model, rp, rp, device)
+
+predictions = utils.TwoDPredictions(model, rp, rp, device, numticks)
 sns.heatmap(predictions, square=True, xticklabels=False, yticklabels=False, ax=ax222, cbar=True,
             center=c, cbar_kws={'label': 'Risk'}, vmin=vmin)
+ax222.scatter(rp*numticks, (ur-rp)*numticks, s=100, color=utils.dest_color)
+ax222.scatter(depot_x*numticks, (ur-depot_y)*numticks, s=100, color=utils.depot_color)
 ax222.set_xlabel('Longitude')
 ax222.set_ylabel('Latitude')
-predictions = utils.TwoDPredictions(model, rm, rm, device)
+
+predictions = utils.TwoDPredictions(model, rm, rm, device, numticks)
 sns.heatmap(predictions, square=True, xticklabels=False, yticklabels=False, ax=ax223, cbar=True,
             center=c, cbar_kws={'label': 'Risk'}, vmin=vmin)
+ax223.scatter(rm*numticks, (ur-rm)*numticks, s=100, color=utils.dest_color)
+ax223.scatter(depot_x*numticks, (ur-depot_y)*numticks, s=100, color=utils.depot_color)
 ax223.set_xlabel('Longitude')
 ax223.set_ylabel('Latitude')
-predictions = utils.TwoDPredictions(model, rp, rm, device)
+
+predictions = utils.TwoDPredictions(model, rp, rm, device, numticks)
 sns.heatmap(predictions, square=True, xticklabels=False, yticklabels=False, ax=ax224, cbar=True,
             center=c, cbar_kws={'label': 'Risk'}, vmin=vmin)
+ax224.scatter(rp*numticks, (ur-rm)*numticks, s=100, color=utils.dest_color)
+ax224.scatter(depot_x*numticks, (ur-depot_y)*numticks, s=100, color=utils.depot_color)
 ax224.set_xlabel('Longitude')
 ax224.set_ylabel('Latitude')
+
 plt.show()
 
 #now plot on top of graph
@@ -371,69 +402,81 @@ ax222 = fig.add_subplot(222)
 ax223 = fig.add_subplot(223)
 ax224 = fig.add_subplot(224)
 
-ns = 20
+ns = 40
 
 G = Gc
 
-predictions, node_list = utils.InferNodeRiskMultiple(G, nodes.index, 0.0, 1.0, model, device, coord_bounds)
+predictions, node_list = utils.InferNodeRiskMultiple(G, nodes.index, rm, rp, model, device, coord_bounds)
 nx.set_node_attributes(G, {nodes.index[i]: predictions[i][0] for i in range(len(predictions))}, name='r')
-nc = ox.plot.get_node_colors_by_attr(G, attr='r')
+nc = ox.plot.get_node_colors_by_attr(G, attr='r', cmap=sns.color_palette("rocket", as_cmap=True))
 ox.plot_graph(G, ax = ax221, node_color=nc, node_size=ns, edge_linewidth=0.5, figsize=(15,15),
                         bgcolor='white', show=False, close=False)
-ax221 = utils.scatterGraph(depot_node, G, ax221, color='blue')
+ax221 = utils.scatterGraph(depot_node, G, ax221, color=utils.depot_color)
+lon_d, lat_d = utils.UnitToLatLon(rm, rp, coord_bounds)
+dest_node = ox.get_nearest_nodes(G, [lon_d], [lat_d])
+ax221 = utils.scatterGraph(dest_node, G, ax221, color=utils.dest_color)
 
 G = Gc
 
-predictions, node_list = utils.InferNodeRiskMultiple(G, nodes.index, 1.0, 1.0, model, device, coord_bounds)
+predictions, node_list = utils.InferNodeRiskMultiple(G, nodes.index, rp, rp, model, device, coord_bounds)
 nx.set_node_attributes(G, {nodes.index[i]: predictions[i][0] for i in range(len(predictions))}, name='r')
-nc = ox.plot.get_node_colors_by_attr(G, attr='r')
+nc = ox.plot.get_node_colors_by_attr(G, attr='r', cmap=sns.color_palette("rocket", as_cmap=True))
 ox.plot_graph(G, ax = ax222, node_color=nc, node_size=ns, edge_linewidth=0.5, figsize=(15,15),
                         bgcolor='white', show=False, close=False)
-ax222 = utils.scatterGraph(depot_node, G, ax222, color='blue')
+ax222 = utils.scatterGraph(depot_node, G, ax222, color=utils.depot_color)
+lon_d, lat_d = utils.UnitToLatLon(rp, rp, coord_bounds)
+dest_node = ox.get_nearest_nodes(G, [lon_d], [lat_d])
+ax222 = utils.scatterGraph(dest_node, G, ax222, color=utils.dest_color)
 
 G = Gc
 
-predictions, node_list = utils.InferNodeRiskMultiple(G, nodes.index, 0.0, 0.0, model, device, coord_bounds)
+predictions, node_list = utils.InferNodeRiskMultiple(G, nodes.index, rm, rm, model, device, coord_bounds)
 nx.set_node_attributes(G, {nodes.index[i]: predictions[i][0] for i in range(len(predictions))}, name='r')
-nc = ox.plot.get_node_colors_by_attr(G, attr='r')
+nc = ox.plot.get_node_colors_by_attr(G, attr='r', cmap=sns.color_palette("rocket", as_cmap=True))
 ox.plot_graph(G, ax = ax223, node_color=nc, node_size=ns, edge_linewidth=0.5, figsize=(15,15),
                         bgcolor='white', show=False, close=False)
-ax223 = utils.scatterGraph(depot_node, G, ax223, color='blue')
+ax223 = utils.scatterGraph(depot_node, G, ax223, color=utils.depot_color)
+lon_d, lat_d = utils.UnitToLatLon(rm, rm, coord_bounds)
+dest_node = ox.get_nearest_nodes(G, [lon_d], [lat_d])
+ax223 = utils.scatterGraph(dest_node, G, ax223, color=utils.dest_color)
 
 G = Gc
 
-predictions, node_list = utils.InferNodeRiskMultiple(G, nodes.index, 1.0, 0.0, model, device, coord_bounds)
+predictions, node_list = utils.InferNodeRiskMultiple(G, nodes.index, rp, rm, model, device, coord_bounds)
 nx.set_node_attributes(G, {nodes.index[i]: predictions[i][0] for i in range(len(predictions))}, name='r')
-nc = ox.plot.get_node_colors_by_attr(G, attr='r')
+nc = ox.plot.get_node_colors_by_attr(G, attr='r', cmap=sns.color_palette("rocket", as_cmap=True))
 ox.plot_graph(G, ax = ax224, node_color=nc, node_size=ns, edge_linewidth=0.5, figsize=(15,15),
                         bgcolor='white', show=False, close=False)
-ax224 = utils.scatterGraph(depot_node, G, ax224, color='blue')
+ax224 = utils.scatterGraph(depot_node, G, ax224, color=utils.depot_color)
+lon_d, lat_d = utils.UnitToLatLon(rp, rm, coord_bounds)
+dest_node = ox.get_nearest_nodes(G, [lon_d], [lat_d])
+ax224 = utils.scatterGraph(dest_node, G, ax224, color=utils.dest_color)
 
 
 plt.show()
 
-#plot the isochrones
-network_type = 'drive'
-trip_times = [5, 10, 15, 20] #in minutes
-travel_speed = 15 #driving speed in km/hour
-G = utils.getGraphWithSetting(city)
-depot_local = utils.getDepotLocation(city)
-gdf_nodes = ox.graph_to_gdfs(G, edges=False)
-center_node = ox.get_nearest_node(G, depot_local)
-G = ox.project_graph(G)
-
-meters_per_minute = travel_speed * 1000 / 60 #km per hour to m per minute
-for u, v, k, data in G.edges(data=True, keys=True):
-    data['time'] = data['length'] / meters_per_minute
-
-iso_colors = ox.plot.get_colors(n=len(trip_times), cmap='plasma', start=0, return_hex=True)
-
-isochrone_polys = []
-for trip_time in sorted(trip_times, reverse=True):
-    subgraph = nx.ego_graph(G, center_node, radius=trip_time, distance='time')
-    node_points = [Point((data['x'], data['y'])) for node, data in subgraph.nodes(data=True)]
-    bounding_poly = gpd.GeoSeries(node_points).unary_union.convex_hull
-    isochrone_polys.append(bounding_poly)
+# #plot the isochrones
+# network_type = 'drive'
+# trip_times = [5, 10, 15, 20] #in minutes
+# travel_speed = 15 #driving speed in km/hour
+# G = utils.getGraphWithSetting(city)
+# depot_local = utils.getDepotLocation(city)
+# gdf_nodes = ox.graph_to_gdfs(G, edges=False)
+# center_node = ox.get_nearest_node(G, depot_local)
+# G = ox.project_graph(G)
+#
+# meters_per_minute = travel_speed * 1000 / 60 #km per hour to m per minute
+# for u, v, k, data in G.edges(data=True, keys=True):
+#     data['time'] = data['length'] / meters_per_minute
+#
+# iso_colors = ox.plot.get_colors(n=len(trip_times), cmap='plasma', start=0, return_hex=True)
+#
+# isochrone_polys = []
+# for trip_time in sorted(trip_times, reverse=True):
+#     subgraph = nx.ego_graph(G, center_node, radius=trip_time, distance='time')
+#     node_points = [Point((data['x'], data['y'])) for node, data in subgraph.nodes(data=True)]
+#     bounding_poly = gpd.GeoSeries(node_points).unary_union.convex_hull
+#     isochrone_polys.append(bounding_poly)
 
 # #plot isochrone and heatmap side by side
 
@@ -454,5 +497,18 @@ for trip_time in sorted(trip_times, reverse=True):
 #     patch = PolygonPatch(polygon, fc=fc, ec='none', alpha=0.4, zorder=-1)
 #     ax.add_patch(patch)
 # plt.show()
+
+print('Median', np.median(perf))
+print('MSE', perf_mse)
+print('MAE', np.mean(perf_mae))
+print('Max Err', np.max(np.abs(perf)))
+
+import csv
+fields=[city, n_l, n_n, lr, d_p, epochs, perf_mse, np.mean(perf_mae)]
+print(fields)
+with open(r'log_hyper.csv', 'a') as f:
+    writer = csv.writer(f)
+    writer.writerow(fields)
+    # writer.writerow(["city", "n_layers", "n_neurons", "learn_rate", "dropout", "epochs", "mse", "mae"])
 
 

@@ -28,7 +28,7 @@ im.reload(utils)
 #   print("Cuda Device Available")
 #   print("Name of the Cuda Device: ", torch.cuda.get_device_name())
 #   print("GPU Computational Capablity: ", torch.cuda.get_device_capability())
-city = 'chicago'
+city = 'janeiro'
 G = utils.getGraphWithSetting(city)
 
 # with open('CU_graph.pkl', 'rb') as f:
