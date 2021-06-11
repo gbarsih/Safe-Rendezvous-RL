@@ -54,7 +54,7 @@ device = torch.device(dev)
 #   print("Name of the Cuda Device: ", torch.cuda.get_device_name())
 #   print("GPU Computational Capablity: ", torch.cuda.get_device_capability())
 
-city = 'chicago' # chicago, dtchicago, champaign
+city = 'champaign' # chicago, dtchicago, champaign
 G = utils.getGraphWithSetting(city)
 
 # with open('CU_graph.pkl', 'wb') as f:
