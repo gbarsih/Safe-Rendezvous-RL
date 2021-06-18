@@ -1,0 +1,5 @@
+city,dataset_name,n_nodes,n_edges,data_size
+Champaign-Urbana,champaign,3450,9975,217399
+Downtown Chicago,dtchicago,3588,9351,153805
+Chicago,chicago,28455,75921,129870
+Rio de Janeiro,janeiro,69561,171161,167952

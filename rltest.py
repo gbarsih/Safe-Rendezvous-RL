@@ -12,11 +12,11 @@ import geopy.distance as gd
 # import re
 import seaborn as sns;
 
-sns.set_theme()
-sns.set_style("whitegrid")
-sns.set_context("talk")
-sns.color_palette("tab10")
-sns.color_palette("crest", as_cmap=True)
+# sns.set_theme()
+# sns.set_style("whitegrid")
+sns.set_context("paper")
+# sns.color_palette("tab10")
+# sns.color_palette("crest", as_cmap=True)
 
 import osmnx as ox
 import networkx as nx
@@ -33,13 +33,12 @@ import os
 from os import listdir
 from os.path import isfile, join
 import pandas as pd
-# from multiprocessing import Pool as ThreadPool
-# import multiprocessing as mp
+
 im.reload(utils)
 
-figsize = (25,15)
-
-os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3"
+figsize = utils.figsize
+dpi = utils.dpi
+os.environ["CUDA_VISIBLE_DEVICES"] = "4,5"
 
 if torch.cuda.is_available():
     dev = "cuda:0"
@@ -48,129 +47,16 @@ else:
 
 device = torch.device(dev)
 
-# if torch.cuda.is_available():
-#   device = torch.device("cuda:0")
-#   print("Cuda Device Available")
-#   print("Name of the Cuda Device: ", torch.cuda.get_device_name())
-#   print("GPU Computational Capablity: ", torch.cuda.get_device_capability())
-
-city = 'champaign' # chicago, dtchicago, champaign
+city = 'dtchicago'  # chicago, dtchicago, champaign
 G = utils.getGraphWithSetting(city)
 
-# with open('CU_graph.pkl', 'wb') as f:
-#     pickle.dump(G, f)
-#
-# with open('CU_graph.pkl', 'rb') as f:
-#     G = pickle.load(f)
+risks, deltas, routes = utils.getDatasetFromCity(city)
 
-# directory = '/data/risk_datasets/mixed_data_old_no_dev/'
-directory = 'dataset_'+city+'_max5risk/'
-filename = 'res'
-file = directory + filename
-onlyfiles = [f for f in listdir(directory) if isfile(join(directory, f)) and f[0] is 'r']
+oxp, oyp, dxp, dyp, rrv, rxp, ryp, ddv, coord_bounds, depot_local, depot_node = utils.unPackDataset(city, G, risks,
+                                                                                                    deltas, routes)
 
-routes = []
-risks = []
-deltas = []
-for file in onlyfiles:
-    localfile = directory + file
-    print('Opening file', localfile)
-    with open(directory + file, 'rb') as f:
-        res_pkl = pickle.load(f)
+ur = coord_bounds['ur']
 
-
-    ro, ri, dd = zip(*res_pkl)
-    deltas.extend(dd)
-    routes.extend(ro)
-    risks.extend(ri)
-
-
-# risks = [risks[i] for i in range(len(risks)) if len(routes[i]) > 0]
-# routes = [routes[i] for i in range(len(routes)) if len(routes[i]) > 0]
-# deltas = [deltas[i] for i in range(len(deltas)) if len(routes[i]) > 0]
-
-data_size = len(risks)
-split = 0.7
-train_data_size = int(0.7 * data_size)
-test_data_size = data_size - train_data_size
-
-oxp = []
-oyp = []
-dxp = []
-dyp = []
-rrv = []
-rrd = []
-
-rp = []
-rxp = []
-ryp = []
-
-risks_treated = [risks[i] for i in range(data_size) if risks[i] < 2.5e9]
-threshold = np.mean(risks_treated)
-r_threshold = 2.5e9
-d_threshold = 1000
-deltas_threshold = np.percentile(deltas, 99)
-
-depot_local = utils.getDepotLocation(city)
-depot_node = ox.get_nearest_nodes(G,[depot_local[1]],[depot_local[0]])
-
-for i in range(data_size):
-    o = routes[i].orig
-    d = routes[i].dest
-    r = routes[i].optNode
-    dist = gd.distance((G.nodes[r]['y'], G.nodes[r]['x']), depot_local).m
-    if len(routes[i].nodes) > 0 and 0 < deltas[i] < deltas_threshold and dist > d_threshold:
-        oxp.append(G.nodes[o]['x'])
-        oyp.append(G.nodes[o]['y'])
-        dxp.append(G.nodes[d]['x'])
-        dyp.append(G.nodes[d]['y'])
-
-        rp.append(r)
-        rxp.append(G.nodes[r]['x'])
-        ryp.append(G.nodes[r]['y'])
-
-        rrv.append(risks[i])
-        rrd.append(deltas[i])
-
-ur = 1.0
-lr = -0.0
-
-ubx = np.maximum(np.max(oxp), np.max(dxp))
-lbx = np.minimum(np.min(oxp), np.min(dxp))
-uby = np.maximum(np.max(oyp), np.max(dyp))
-lby = np.minimum(np.min(oyp), np.min(dyp))
-ubr = np.maximum(np.max(rrv), np.max(rrv))
-lbr = np.minimum(np.min(rrv), np.min(rrv))
-ubd = np.maximum(np.max(rrd), np.max(rrd))
-lbd = np.minimum(np.min(rrd), np.min(rrd))
-oxp = [utils.mapRange(x, lbx, ubx, lr, ur) for x in oxp]
-oyp = [utils.mapRange(x, lby, uby, lr, ur) for x in oyp]
-dxp = [utils.mapRange(x, lbx, ubx, lr, ur) for x in dxp]
-dyp = [utils.mapRange(x, lby, uby, lr, ur) for x in dyp]
-rrv = [utils.mapRange(x, lbr, ubr, lr, ur) for x in rrv]
-rxp = [utils.mapRange(x, lbx, ubx, lr, ur) for x in rxp]
-ryp = [utils.mapRange(x, lby, uby, lr, ur) for x in ryp]
-ddv = [utils.mapRange(x, lbd, ubd, lr, ur) for x in rrd]
-
-# plt.plot(ddv); plt.show()
-#
-# fig = plt.figure(figsize=figsize, dpi=100)
-# ax = Axes3D(fig)
-# ax.scatter(rxp, ryp, ddv, marker='o', s=10, c='blue', alpha=0.1)
-# ax.view_init(elev=90., azim=270)
-# # ax.set_zlim(lr, 0.1)
-# ax.set_xlabel('$X$')
-# ax.set_ylabel('$Y$')
-# ax.set_zlabel('$Risk$')
-# ax.set_title(directory)
-# plt.show()
-
-coord_bounds = {'ubx': ubx, 'lbx': lbx, 'uby': uby, 'lby': lby, 'ur': ur, 'lr': lr, 'lbd': lbd, 'ubd': ubd}
-
-# df = pd.DataFrame(list(zip(oxp, oyp, dxp, dyp, rrv)),
-#                   columns=['X_origin', 'Y_origin', 'X_destination', 'Y_destination', 'risk'])
-# Inputs = ['X_origin', 'Y_origin', 'X_destination', 'Y_destination']
-# Outputs = ['risk']
 df = pd.DataFrame(list(zip(oxp, oyp, dxp, dyp, rrv, ddv)),
                   columns=['X_origin', 'Y_origin', 'X_destination', 'Y_destination', 'risks', 'deltas'])
 Inputs = ['X_origin', 'Y_origin', 'X_destination', 'Y_destination']
@@ -185,8 +71,6 @@ r = df['deltas'].values
 inp_stack = torch.tensor(df[Inputs].values, dtype=torch.float64)
 out_stack = torch.tensor(df[Outputs].values, dtype=torch.float32)
 
-# plt.plot(out_stack); plt.show()
-
 total_data_entries = len(r)
 test_data = int(total_data_entries * .1)
 
@@ -199,8 +83,6 @@ test_outputs = out_stack[total_data_entries - test_data:total_data_entries].to(d
 rxpt = rxp[total_data_entries - test_data:total_data_entries]
 rypt = ryp[total_data_entries - test_data:total_data_entries]
 
-
-
 class Model(nn.Module):
 
     def __init__(self, input_size, output_size, layers, p=0.2):
@@ -210,7 +92,7 @@ class Model(nn.Module):
 
         for i in layers:
             all_layers.append(nn.Linear(input_size, i))
-            all_layers.append(nn.ReLU())
+            all_layers.append(nn.SELU())  # Leaky Doing well
             all_layers.append(nn.BatchNorm1d(i))
             all_layers.append(nn.Dropout(p))
             input_size = i
@@ -223,21 +105,21 @@ class Model(nn.Module):
         x = self.layers(inputs)
         return x
 
-n_l = 2
-n_n = 128
-d_p = 0.8
+n_l = 3
+n_n = 32
+d_p = 0.1
 lr = 0.001
 
 layers = []
 for i in range(n_l):
-    layers.append(n_n) # 32-128 range with low dropout (0.1-0.4) seems to work the best
+    layers.append(n_n)  # 32-128 range with low dropout (0.1-0.4) seems to work the best
 
 # layers.append(32)
 
 model = Model(4, 1, layers, p=d_p)
 model = nn.DataParallel(model)
 model.to(device)
-epochs = 20000
+epochs = 10000
 num_stints = 1
 aggregated_losses = []
 
@@ -280,16 +162,15 @@ for k in range(num_stints):
         'loss': single_loss,
     }, 'checkpoints/mdl.pth')
 
-
 print(f'epoch: {i:3} loss: {single_loss.item():10.10f}')
 
-fig = plt.figure(figsize=figsize, dpi=100)
-plt.plot(aggregated_losses, label="Training Loss", linewidth=3)
-# plt.ylim((0, np.percentile(aggregated_losses,90).cpu().detach().numpy()))
-plt.xlabel('Epoch')
-plt.ylabel('Training Loss')
-plt.title(directory)
-plt.show()
+# fig = plt.figure(figsize=figsize, dpi=100)
+# plt.plot(aggregated_losses, label="Training Loss", linewidth=3)
+# # plt.ylim((0, np.percentile(aggregated_losses,90).cpu().detach().numpy()))
+# plt.xlabel('Epoch')
+# plt.ylabel('Training Loss')
+# plt.title(directory)
+# plt.show()
 
 with torch.no_grad():
     model.eval()
@@ -327,25 +208,25 @@ pl = np.min(perf)
 perfp = [utils.mapRange(x, pl, pu, lr, ur) for x in perf]
 perf_mse = np.mean(perf_mse)
 
-fig = plt.figure(figsize=figsize, dpi=100)
-ax = Axes3D(fig)
-ax.scatter(rxpp, rypp, rrvp, marker='o', s=10, c='blue', alpha=0.1)
-ax.scatter(rxpp, rypp, preds, marker='o', s=10, c='red', alpha=0.1)
-ax.view_init(elev=00., azim=270)
-# ax.set_zlim(lr, 0.5)
-ax.set_xlabel('$X$')
-ax.set_ylabel('$Y$')
-ax.set_zlabel('$Risk$')
-ax.set_title(directory)
-plt.show()
+# fig = plt.figure(figsize=figsize, dpi=100)
+# ax = Axes3D(fig)
+# ax.scatter(rxpp, rypp, rrvp, marker='o', s=10, c='blue', alpha=0.1)
+# ax.scatter(rxpp, rypp, preds, marker='o', s=10, c='red', alpha=0.1)
+# ax.view_init(elev=00., azim=270)
+# # ax.set_zlim(lr, 0.5)
+# ax.set_xlabel('$X$')
+# ax.set_ylabel('$Y$')
+# ax.set_zlabel('$Risk$')
+# ax.set_title(directory)
+# plt.show()
 
 
 ## plot a heatmap of risks
 im.reload(utils)
-fig = plt.figure(figsize=figsize, dpi=100)
-suptitle_font = {'fontsize': 40, 'fontweight': 'normal', 'y': 0.98}
-tts = 'Risk Assessment for Edge Destinations'+directory
-fig.suptitle('Risk Assessment for Edge Destinations', **suptitle_font)
+fig = plt.figure(figsize=utils.figsize, dpi=utils.dpi)
+suptitle_font = {'fontsize': 14, 'fontweight': 'normal', 'y': 0.98}
+fig.suptitle(utils.getCityName(city) + ', $n_l$: {}, $n_n$: {}, $p_d$: {}, MAE: {:5.4}'.format(n_l, n_n, d_p, np.mean(perf_mae)),
+             **suptitle_font)
 ax221 = fig.add_subplot(221)
 ax222 = fig.add_subplot(222)
 ax223 = fig.add_subplot(223)
@@ -359,58 +240,64 @@ numticks = 1000
 depot_x, depot_y = utils.LatLonToUnit(depot_local[0], depot_local[1], coord_bounds)
 predictions = utils.TwoDPredictions(model, rm, rp, device, numticks)
 sns.heatmap(predictions, square=True, xticklabels=False, yticklabels=False, ax=ax221, cbar=True,
-            center=c, cbar_kws={'label': 'Risk'}, vmin=vmin)
-ax221.scatter(rm*numticks, (ur-rp)*numticks, s=100, color=utils.dest_color)
-ax221.scatter(depot_x*numticks, (ur-depot_y)*numticks, s=100, color=utils.depot_color)
+            center=c, cbar_kws={'label': 'Risk', 'location': 'top', 'use_gridspec': False}, vmin=vmin)
+ax221.scatter(rm * numticks, (ur - rp) * numticks, s=100, color=utils.dest_color)
+ax221.scatter(depot_x * numticks, (ur - depot_y) * numticks, s=100, color=utils.depot_color)
 ax221.set_xlabel('Longitude')
 ax221.set_ylabel('Latitude')
 
 predictions = utils.TwoDPredictions(model, rp, rp, device, numticks)
 sns.heatmap(predictions, square=True, xticklabels=False, yticklabels=False, ax=ax222, cbar=True,
-            center=c, cbar_kws={'label': 'Risk'}, vmin=vmin)
-ax222.scatter(rp*numticks, (ur-rp)*numticks, s=100, color=utils.dest_color)
-ax222.scatter(depot_x*numticks, (ur-depot_y)*numticks, s=100, color=utils.depot_color)
+            center=c, cbar_kws={'label': 'Risk', 'location': 'top', 'use_gridspec': False}, vmin=vmin)
+ax222.scatter(rp * numticks, (ur - rp) * numticks, s=100, color=utils.dest_color)
+ax222.scatter(depot_x * numticks, (ur - depot_y) * numticks, s=100, color=utils.depot_color)
 ax222.set_xlabel('Longitude')
 ax222.set_ylabel('Latitude')
 
 predictions = utils.TwoDPredictions(model, rm, rm, device, numticks)
 sns.heatmap(predictions, square=True, xticklabels=False, yticklabels=False, ax=ax223, cbar=True,
-            center=c, cbar_kws={'label': 'Risk'}, vmin=vmin)
-ax223.scatter(rm*numticks, (ur-rm)*numticks, s=100, color=utils.dest_color)
-ax223.scatter(depot_x*numticks, (ur-depot_y)*numticks, s=100, color=utils.depot_color)
+            center=c, cbar_kws={'label': 'Risk', 'location': 'top', 'use_gridspec': False}, vmin=vmin)
+ax223.scatter(rm * numticks, (ur - rm) * numticks, s=100, color=utils.dest_color)
+ax223.scatter(depot_x * numticks, (ur - depot_y) * numticks, s=100, color=utils.depot_color)
 ax223.set_xlabel('Longitude')
 ax223.set_ylabel('Latitude')
 
 predictions = utils.TwoDPredictions(model, rp, rm, device, numticks)
 sns.heatmap(predictions, square=True, xticklabels=False, yticklabels=False, ax=ax224, cbar=True,
-            center=c, cbar_kws={'label': 'Risk'}, vmin=vmin)
-ax224.scatter(rp*numticks, (ur-rm)*numticks, s=100, color=utils.dest_color)
-ax224.scatter(depot_x*numticks, (ur-depot_y)*numticks, s=100, color=utils.depot_color)
+            center=c, cbar_kws={'label': 'Risk', 'location': 'top', 'use_gridspec': False}, vmin=vmin)
+ax224.scatter(rp * numticks, (ur - rm) * numticks, s=100, color=utils.dest_color)
+ax224.scatter(depot_x * numticks, (ur - depot_y) * numticks, s=100, color=utils.depot_color)
 ax224.set_xlabel('Longitude')
 ax224.set_ylabel('Latitude')
 
+filepath = 'images/' + city + 'heat.png'
+plt.savefig(filepath)
+
 plt.show()
 
-#now plot on top of graph
+# now plot on top of graph
 im.reload(utils)
 Gc = utils.getGraphWithSetting(city)
 
 nodes, edges = ox.graph_to_gdfs(G, nodes=True, edges=True)
-fig = plt.figure(figsize=(15, 15), dpi=100)
+fig = plt.figure(figsize=utils.figsize, dpi=utils.dpi)
+suptitle_font = {'fontsize': 14, 'fontweight': 'normal', 'y': 0.98}
+fig.suptitle(utils.getCityName(city) + ', $n_l$: {}, $n_n$: {}, $p_d$: {}, MAE: {:5.4}'.format(n_l, n_n, d_p, np.mean(perf_mae)),
+             **suptitle_font)
 ax221 = fig.add_subplot(221)
 ax222 = fig.add_subplot(222)
 ax223 = fig.add_subplot(223)
 ax224 = fig.add_subplot(224)
 
-ns = 40
+ns = utils.ns
 
 G = Gc
 
 predictions, node_list = utils.InferNodeRiskMultiple(G, nodes.index, rm, rp, model, device, coord_bounds)
 nx.set_node_attributes(G, {nodes.index[i]: predictions[i][0] for i in range(len(predictions))}, name='r')
 nc = ox.plot.get_node_colors_by_attr(G, attr='r', cmap=sns.color_palette("rocket", as_cmap=True))
-ox.plot_graph(G, ax = ax221, node_color=nc, node_size=ns, edge_linewidth=0.5, figsize=(15,15),
-                        bgcolor='white', show=False, close=False)
+ox.plot_graph(G, ax=ax221, node_color=nc, node_size=ns, edge_linewidth=utils.edge_lw, figsize=utils.figsize,
+              bgcolor='white', show=False, close=False)
 ax221 = utils.scatterGraph(depot_node, G, ax221, color=utils.depot_color)
 lon_d, lat_d = utils.UnitToLatLon(rm, rp, coord_bounds)
 dest_node = ox.get_nearest_nodes(G, [lon_d], [lat_d])
@@ -421,8 +308,8 @@ G = Gc
 predictions, node_list = utils.InferNodeRiskMultiple(G, nodes.index, rp, rp, model, device, coord_bounds)
 nx.set_node_attributes(G, {nodes.index[i]: predictions[i][0] for i in range(len(predictions))}, name='r')
 nc = ox.plot.get_node_colors_by_attr(G, attr='r', cmap=sns.color_palette("rocket", as_cmap=True))
-ox.plot_graph(G, ax = ax222, node_color=nc, node_size=ns, edge_linewidth=0.5, figsize=(15,15),
-                        bgcolor='white', show=False, close=False)
+ox.plot_graph(G, ax=ax222, node_color=nc, node_size=ns, edge_linewidth=utils.edge_lw, figsize=utils.figsize,
+              bgcolor='white', show=False, close=False)
 ax222 = utils.scatterGraph(depot_node, G, ax222, color=utils.depot_color)
 lon_d, lat_d = utils.UnitToLatLon(rp, rp, coord_bounds)
 dest_node = ox.get_nearest_nodes(G, [lon_d], [lat_d])
@@ -433,8 +320,8 @@ G = Gc
 predictions, node_list = utils.InferNodeRiskMultiple(G, nodes.index, rm, rm, model, device, coord_bounds)
 nx.set_node_attributes(G, {nodes.index[i]: predictions[i][0] for i in range(len(predictions))}, name='r')
 nc = ox.plot.get_node_colors_by_attr(G, attr='r', cmap=sns.color_palette("rocket", as_cmap=True))
-ox.plot_graph(G, ax = ax223, node_color=nc, node_size=ns, edge_linewidth=0.5, figsize=(15,15),
-                        bgcolor='white', show=False, close=False)
+ox.plot_graph(G, ax=ax223, node_color=nc, node_size=ns, edge_linewidth=utils.edge_lw, figsize=utils.figsize,
+              bgcolor='white', show=False, close=False)
 ax223 = utils.scatterGraph(depot_node, G, ax223, color=utils.depot_color)
 lon_d, lat_d = utils.UnitToLatLon(rm, rm, coord_bounds)
 dest_node = ox.get_nearest_nodes(G, [lon_d], [lat_d])
@@ -445,13 +332,15 @@ G = Gc
 predictions, node_list = utils.InferNodeRiskMultiple(G, nodes.index, rp, rm, model, device, coord_bounds)
 nx.set_node_attributes(G, {nodes.index[i]: predictions[i][0] for i in range(len(predictions))}, name='r')
 nc = ox.plot.get_node_colors_by_attr(G, attr='r', cmap=sns.color_palette("rocket", as_cmap=True))
-ox.plot_graph(G, ax = ax224, node_color=nc, node_size=ns, edge_linewidth=0.5, figsize=(15,15),
-                        bgcolor='white', show=False, close=False)
+ox.plot_graph(G, ax=ax224, node_color=nc, node_size=ns, edge_linewidth=utils.edge_lw, figsize=utils.figsize,
+              bgcolor='white', show=False, close=False)
 ax224 = utils.scatterGraph(depot_node, G, ax224, color=utils.depot_color)
 lon_d, lat_d = utils.UnitToLatLon(rp, rm, coord_bounds)
 dest_node = ox.get_nearest_nodes(G, [lon_d], [lat_d])
 ax224 = utils.scatterGraph(dest_node, G, ax224, color=utils.dest_color)
 
+filepath = 'images/' + city + 'map_heat.png'
+plt.savefig(filepath)
 
 plt.show()
 
@@ -504,11 +393,10 @@ print('MAE', np.mean(perf_mae))
 print('Max Err', np.max(np.abs(perf)))
 
 import csv
-fields=[city, n_l, n_n, lr, d_p, epochs, perf_mse, np.mean(perf_mae)]
+
+fields = [city, n_l, n_n, lr, d_p, epochs, perf_mse, np.mean(perf_mae)]
 print(fields)
 with open(r'log_hyper.csv', 'a') as f:
     writer = csv.writer(f)
     writer.writerow(fields)
     # writer.writerow(["city", "n_layers", "n_neurons", "learn_rate", "dropout", "epochs", "mse", "mae"])
-
-

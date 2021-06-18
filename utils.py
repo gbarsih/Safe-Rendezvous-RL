@@ -13,6 +13,13 @@ import time
 import datetime
 import torch
 from pprint import pprint
+import seaborn as sns
+import pickle
+import os
+from os import listdir
+from os.path import isfile, join
+
+import csv
 
 coords_1 = (52.2296756, 21.0122287)
 coords_2 = (52.406374, 16.9251681)
@@ -26,7 +33,12 @@ depot_rio = (-22.922332034177217, -43.19078181012658)
 depot_color = 'green'
 dest_color = 'cyan'
 
-figsize = (25, 15)
+figsize = (6, 6)
+dpi = 200
+edge_lw = 0.5
+route_lw = 5
+node_lw = 1
+ns = 5
 
 print(gd.distance(coords_1, coords_2).km)
 
@@ -215,7 +227,7 @@ class iRoute:
             if len(node_list) > 1 and jump:
                 # print("rerouting!!",node_list, self.pos)
                 newRoute = reRoute(G, self.route[self.pos], node_list[np.random.randint(0, len(node_list))],
-                                     self.dest)
+                                   self.dest)
                 if len(newRoute) > 3:
                     self.deviated = True
                     self.route = newRoute
@@ -224,7 +236,7 @@ class iRoute:
                     self.pos = 0
                     self.lt = len(self.t)
                 else:
-                    self.pos += 1 #ignore new route, too short
+                    self.pos += 1  # ignore new route, too short
             else:
                 self.pos += 1  # advance one node
 
@@ -501,7 +513,6 @@ def routeRiskSingle(G, o, d, Edetours, t_0, nroutes, city):
         return
 
 
-
 def fastBigData(G, city, nroutes=100, npairs=100, Edetours=1, pool_size=cpus):
     # print('fastBigData', city)
     pool_size = np.minimum(pool_size, cpus)
@@ -509,7 +520,7 @@ def fastBigData(G, city, nroutes=100, npairs=100, Edetours=1, pool_size=cpus):
     orig_b = random.choices(list(G), k=npairs)  # orig/dest pairs
     dest_b = random.choices(list(G), k=npairs)
 
-    #instead of doing this, lets compute djikstra
+    # instead of doing this, lets compute djikstra
 
     # y_o = [G.nodes[node]['y'] for node in orig_b]
     # x_o = [G.nodes[node]['x'] for node in orig_b]
@@ -611,11 +622,10 @@ def computeOptRdvNode(x, y, t, city):
         return np.argmin(E)
 
 
-
-
 def computeRendezvousEnergy(nodes, times, G):
     n = len(nodes)
-    if n is not len(times):
+    if n != len(times):
+        print(len(times), n)
         raise Exception("Input dim error computeRendezvousEnergy")
     E = []
     for node, time in zip(nodes, times):
@@ -848,7 +858,7 @@ def getGraphWithSetting(city):
 
     elif city is 'dtchicago':
         places = ['201 E Randolph St, Chicago, IL, 60602']
-        G = ox.graph_from_address(places, network_type="drive", simplify=True, dist = 5000)
+        G = ox.graph_from_address(places, network_type="drive", simplify=True, dist=5000)
         G = ox.add_edge_speeds(G)
         G = ox.add_edge_travel_times(G)
         G = ox.bearing.add_edge_bearings(G)
@@ -857,15 +867,65 @@ def getGraphWithSetting(city):
     return G
 
 
-def plotCityMapForSlides(city, fmt='png'):
+def getGdfsFeature(city):
+    if city is 'champaign':
+        places = ['Champaign, Illinois, USA', 'Urbana, Illinois, USA']
+        _gdf = ox.geometries_from_place(places, {"building": True})
+        _gdf_parks = ox.geometries_from_place(places, {"leisure": 'park'})
+        _gdf_water = ox.geometries_from_place(places, {"water": True})
+
+    elif city is 'chicago':
+        places = ['Chicago, Illinois, USA']
+        _gdf = ox.geometries_from_place(places, {"building": True})
+        _gdf_parks = ox.geometries_from_place(places, {"leisure": 'park'})
+        _gdf_water = ox.geometries_from_place(places, {"water": True})
+
+    elif city is 'janeiro':
+        places = ['Rio de Janeiro, Rio de Janeiro, Brazil']
+        _gdf = ox.geometries_from_place(places, {"building": True})
+        _gdf_parks = ox.geometries_from_place(places, {"leisure": 'park'})
+        _gdf_water = ox.geometries_from_place(places, {"water": True})
+
+    elif city is 'dtchicago':
+        places = ['Chicago, Illinois, USA']
+        _gdf = ox.geometries_from_place(places, {"building": True})
+        _gdf_parks = ox.geometries_from_place(places, {"leisure": 'park'})
+        _gdf_water = ox.geometries_from_place(places, {"water": True})
+
+    else:
+        _gdf = None
+        _gdf_parks = None
+        _gdf_water = None
+
+    return _gdf, _gdf_parks, _gdf_water
+
+
+def plotRouteExamples(city, fmt='png', fs=figsize, dpi=300, save=True, nroutes=10):
     G = getGraphWithSetting(city)
-    filepath = 'images/' + city + '_map.' + fmt
-    ox.plot_graph(G, node_size=1, node_color="#a3a3a3", edge_color="#a3a3a3", edge_linewidth=0.5,
-                  bgcolor="#ffffff", show=False, dpi=600, figsize=(20, 15), save=True, filepath=filepath);
+    filepath = 'images/' + city + '_ex.' + fmt
+
+    orig = random.sample(list(G), nroutes)
+    dest = random.sample(list(G), nroutes)
+
+    route = []
+    for i in range(len(orig)):
+        try:
+            r = ox.shortest_path(G, orig[i], dest[i], weight="travel_time")
+            route.append(r)
+        except Exception as ex:
+            print(ex)
+
+    fig, ax = ox.plot_graph(G, node_size=node_s, node_color="#a3a3a3", edge_color="#a3a3a3", edge_linewidth=edge_lw,
+                            bgcolor="#ffffff", show=False, dpi=dpi, figsize=fs)
+
+    fig, ax = ox.plot_graph_routes(
+        G, ax=ax, routes=route, route_colors=ox.plot.get_colors(len(route)), route_linewidth=route_lw, node_size=0,
+        close=False, show=False, dpi=dpi, figsize=fs, save=save, filepath=filepath
+    )
     plt.show()
 
 
-def plotRouteDistr(city, fmt='png'):
+def plotRouteDistr(city, fmt='png', fs=figsize, dpi=300, save=True):
     G = getGraphWithSetting(city)
     filepath = 'images/' + city + '_distr.' + fmt
     nroutes = 30
@@ -877,7 +937,7 @@ def plotRouteDistr(city, fmt='png'):
 
     for i in range(100):
         try:
-            routes.append(iRoute(G, orig[0], dest[0], 0.05))
+            routes.append(iRoute(G, city, orig[0], dest[0], 0.05))
         except Exception as ex:
             print(ex)
 
@@ -889,24 +949,53 @@ def plotRouteDistr(city, fmt='png'):
     nodes, times = GatherRoutes(routes)
 
     fig, ax = ox.plot_graph(G, node_size=1, node_color="#a3a3a3", edge_color="#a3a3a3", edge_linewidth=0.5,
-                            bgcolor="#ffffff", show=False, dpi=600, figsize=figsize)
+                            bgcolor="#ffffff", show=False, dpi=dpi, figsize=fs)
 
     ox.plot_graph_routes(
         G, ax=ax, routes=nodes, route_colors='r', route_linewidth=3, node_size=0, route_alpha=0.2,
-        close=False, show=False, dpi=600, figsize=figsize, save=True, filepath=filepath);
+        close=False, show=False, dpi=dpi, figsize=fs, save=save, filepath=filepath);
+    plt.show()
+
+def plotCityMapForSlides(city, fmt='png'):
+    G = getGraphWithSetting(city)
+    filepath = 'images/' + city + '_map.' + fmt
+
+    if city == 'janeiro' or city == 'chicago':
+        node_size = 0
+        edge_lw_local = edge_lw
+    else:
+        node_size = 40
+        edge_lw_local = 2
+
+    ox.plot_graph(G, node_size=node_size, node_color="#a3a3a3", edge_color="#a3a3a3", edge_linewidth=edge_lw_local,
+                  bgcolor="#ffffff", show=False, dpi=dpi * 2, figsize=(20, 20), save=True, filepath=filepath);
     plt.show()
 
 
 def plotCityMapWithFeatures(city, fmt='png'):
     G = getGraphWithSetting(city)
+    fig = plt.figure(figsize=figsize, dpi=dpi)
     filepath = 'images/' + city + '_feat.' + fmt
+    ax = None
+    if city == 'janeiro' or city == 'champaign':
+        _gdf, _gdf_parks, _gdf_water = getGdfsFeature(city)
+        fig, ax = ox.plot_footprints(_gdf, alpha=0.5, show=False, close=False, bgcolor="#ffffff")
+        fig, ax = ox.plot_footprints(_gdf_parks, ax=ax, alpha=0.5, color="green", show=False, bgcolor="#ffffff")
+        fig, ax = ox.plot_footprints(_gdf_water, ax=ax, alpha=0.5, color="blue", show=False, bgcolor="#ffffff")
 
-    _gdf = ox.geometries_from_place("Champaign County, Illinois, USA", {"building": True})
-    _gdf_parks = ox.geometries_from_place("Champaign County, Illinois, USA", {"leisure": 'park'})
-    _gdf_water = ox.geometries_from_place("Champaign County, Illinois, USA", {"water": True})
+    if city == 'janeiro' or city == 'chicago':
+        node_size = 0
+        edge_lw_local = edge_lw
+    else:
+        node_size = 40
+        edge_lw_local = 2
 
-    ox.plot_graph(G, node_size=1, node_color="#a3a3a3", edge_color="#a3a3a3", edge_linewidth=0.5,
-                  bgcolor="#ffffff", show=False, dpi=600, figsize=(20, 15), save=True, filepath=filepath);
+    ox.plot_graph(G, ax=ax, node_size=node_size, node_color="#a3a3a3", edge_color="#a3a3a3",
+                  edge_linewidth=edge_lw_local,
+                  bgcolor="#ffffff", show=False, dpi=dpi * 2, figsize=(20, 20), save=True, filepath=filepath);
+    plt.show()
+
+    plt.show()
 
 
 def reverse_bearing(x):
@@ -942,7 +1031,7 @@ def polar_plot(ax, bearings, n=36, title=''):
 
     ax.set_ylim(top=frequency.max())
 
-    title_font = {'family': 'Century Gothic', 'size': 24, 'weight': 'bold'}
+    title_font = {'family': 'Century Gothic', 'size': 16, 'weight': 'bold'}
     xtick_font = {'family': 'Century Gothic', 'size': 10, 'weight': 'bold', 'alpha': 1.0, 'zorder': 3}
     ytick_font = {'family': 'Century Gothic', 'size': 9, 'weight': 'bold', 'alpha': 0.2, 'zorder': 3}
 
@@ -959,18 +1048,20 @@ def polar_plot(ax, bearings, n=36, title=''):
 
 
 def plotStreetBearings():
-    places = {#'Champaign': 'Champaign, IL, USA',
-              #'Urbana': 'Urbana, IL, USA',
-              'Chicago': 'Chicago, IL, USA',
-              'Rio de Janeiro': 'Rio de Janeiro, Rio de Janeiro, Brazil',
-              'Sao Paulo': 'Sao Paulo, Sao Paulo, Brazil',
-              'Athens': 'Athens, Greece',
-              'New Delhi': 'New Delhi, India',
-              'Yerevan': 'Yerevan, Armenia',
-              'San Francisco': 'San Francisco, CA, USA',
-              'Belgrade': 'Belgrade, Serbia',
-              'Modena': 'Modena, Italy',
-              }
+    places = {  # 'Champaign': 'Champaign, IL, USA',
+        # 'Urbana': 'Urbana, IL, USA',
+        'Champaign-Urbana': 'champaign',
+        'Downtown Chicago': 'dtchicago',
+        'Chicago': 'Chicago, IL, USA',
+        'Rio de Janeiro': 'Rio de Janeiro, Rio de Janeiro, Brazil',
+        # 'Sao Paulo': 'Sao Paulo, Sao Paulo, Brazil',
+        # 'Athens': 'Athens, Greece',
+        # 'New Delhi': 'New Delhi, India',
+        # 'Yerevan': 'Yerevan, Armenia',
+        # 'San Francisco': 'San Francisco, CA, USA',
+        # 'Belgrade': 'Belgrade, Serbia',
+        # 'Modena': 'Modena, Italy',
+    }
 
     bearings = {}
     weight_by_length = False
@@ -981,7 +1072,10 @@ def plotStreetBearings():
         query = places[place]
         print('getting graph from', place)
         if place == 'Athens':
-            G = ox.graph_from_address('Athens, Greece', dist = 7000, network_type='drive')
+            G = ox.graph_from_address('Athens, Greece', dist=7000, network_type='drive')
+        elif query == 'dtchicago' or query == 'champaign':
+            print('GETTING CUSTOM QUERY from utils.py')
+            G = getGraphWithSetting(query)
         else:
             G = ox.graph_from_place(query, network_type='drive')
 
@@ -1091,6 +1185,99 @@ def plotRoutesAndOptNode(G, city, nroutes=100, Edetours=1):
     return nodes, times
 
 
+def plotRoutesAndOptNodeAndEnergyDist(city, nroutes=100, Edetours=1, fmt='png', fs=figsize, dpi=300):
+    G = getGraphWithSetting(city)
+    filepath = 'images/' + city + '_energies.' + fmt
+
+    node_list = list(G.nodes)
+
+    xs = [G.nodes[i]['x'] for i in node_list]
+    ys = [G.nodes[i]['y'] for i in node_list]
+
+    xmax = np.max(xs)
+    xmin = np.min(xs)
+
+    print(xmax, xmin, xmax - xmin)
+
+    ymax = np.max(ys)
+    ymin = np.min(ys)
+
+    xloc1 = xmax - 0.04
+    xloc2 = xmax - 0.03
+
+    yloc1 = ymax
+    yloc2 = ymin
+
+    o = ox.get_nearest_nodes(G, [xloc2], [yloc2])[0]
+    d = ox.get_nearest_nodes(G, [xloc1], [yloc1])[0]
+
+    routes = []
+    start = time.time()
+    invalid = False
+
+    depot_local = getDepotLocation(city)
+    depot_node = ox.get_nearest_nodes(G, [depot_local[1]], [depot_local[0]])
+    for i in range(nroutes):
+        try:
+            if i == 0:
+                Edetours_l = 0.0
+            else:
+                Edetours_l = Edetours
+
+            routes.append(routeTotalDetourProbality(G, city, o, d, Edetours_l, 0.0))
+        except Exception as ex:
+            print(ex)
+            print("Skipping this dest/orig pair")
+            invalid = True
+            routes = []
+            break
+
+    nroutes = len(routes)
+    risk = 1e10
+    if not invalid:
+        for i in range(nroutes):
+            compRoute(routes[i], G, np.random.randint(1, 1e5))
+            # print(routes[i].deviated, routes[i].p)
+
+        optnodes, opttimes, E, idxs, risk = computeCompositeRisk(routes, G, city)
+        # print(optnodes)
+        # print(routes[0].orig, routes[0].dest)
+        end = time.time()
+        elapsed = end - start
+        print(datetime.datetime.now(), "Finished batch of risk computation in", elapsed)
+        delta = risk - getSingleRouteCost(o, d, G, city)
+        print("delta", delta, "mincost", getSingleRouteCost(o, d, G, city))
+
+    # nodes, times = GatherRoutes(routes)
+
+    # plotNodeEnergies(nodes[0], times[0], G, city, E)
+    fig = plt.figure(figsize=fs, dpi=dpi)
+    ax121 = fig.add_subplot(122)
+    ax122 = fig.add_subplot(121)
+    ox.plot_graph(G, ax=ax121, node_size=node_lw, node_color="#a3a3a3", edge_color="#a3a3a3", edge_linewidth=edge_lw,
+                  bgcolor="#ffffff", show=False)
+
+    ox.plot_graph_route(
+        G, ax=ax121, route=routes[0].nodes, route_colors='r', route_linewidth=route_lw, node_size=0,
+        route_alpha=1.0, close=False, show=False);
+
+    scatterGraph(depot_node, G, ax121, depot_color)
+    scatterGraph(optnodes, G, ax121, 'blue')
+
+    g = sns.histplot(E, bins=40, ax=ax122, kde=True, log_scale=False)
+    ax122.set_title('Histogram of $\mathcal{E}$')
+    ax122.set_xlabel('$E^\star$')
+    ax122.set_ylabel('Count')
+    plt.xlim(0, 1e10)
+
+    plt.savefig(filepath)
+    plt.show()
+
+    # TODO: see what this looks like for deltas
+
+    # return nodes, times
+
+
 def plotNodeEnergies(nodes, times, G, city):
     depot_local = getDepotLocation(city)
 
@@ -1138,7 +1325,8 @@ def getDepotLocation(city):
 
     return depot_local
 
-def plotCityAndDepot(G=None,city='champaign'):
+
+def plotCityAndDepot(G=None, city='champaign'):
     if G is None:
         G = getGraphWithSetting(city)
 
@@ -1154,16 +1342,19 @@ def plotCityAndDepot(G=None,city='champaign'):
     ax = scatterGraph(depot_node, G, ax, color='blue')
     plt.show()
 
+
 def CreateDepotLocation(G):
     gdf_nodes, gdf_edges = ox.graph_to_gdfs(G)
     center_lat = np.mean(gdf_nodes.y.values)
     center_lon = np.mean(gdf_nodes.x.values)
     return (center_lat, center_lon)
 
+
 def UnitToLatLon(x, y, coord_bounds):
     lon = mapRange(x, coord_bounds['lr'], coord_bounds['ur'], coord_bounds['lbx'], coord_bounds['ubx'])
     lat = mapRange(y, coord_bounds['lr'], coord_bounds['ur'], coord_bounds['lby'], coord_bounds['uby'])
     return lon, lat
+
 
 def LatLonToUnit(lat, lon, coord_bounds):
     y = mapRange(lat, coord_bounds['lby'], coord_bounds['uby'], coord_bounds['lr'], coord_bounds['ur'])
@@ -1171,6 +1362,173 @@ def LatLonToUnit(lat, lon, coord_bounds):
     return x, y
 
 
+def plotDataCorrelation(city, fmt='png'):
+    G = getGraphWithSetting(city)
+
+    risks, deltas, routes = getDatasetFromCity(city)
+
+    data_size = len(risks)
+
+    rrv = []
+    rrd = []
+    rp = []
+
+    d_threshold = 1000
+    deltas_threshold = np.percentile(deltas, 99)
+    depot_local = getDepotLocation(city)
+
+    for i in range(data_size):
+        r = routes[i].optNode
+        dist = gd.distance((G.nodes[r]['y'], G.nodes[r]['x']), depot_local).m
+        if len(routes[i].nodes) > 0 and 0 < deltas[i] < deltas_threshold and dist > d_threshold:
+            rp.append(r)
+
+            rrv.append(risks[i])
+            rrd.append(deltas[i])
+
+    ur = 1.0
+    lr = -0.0
+
+    ubr = np.maximum(np.max(rrv), np.max(rrv))
+    lbr = np.minimum(np.min(rrv), np.min(rrv))
+    ubd = np.maximum(np.max(rrd), np.max(rrd))
+    lbd = np.minimum(np.min(rrd), np.min(rrd))
+    rrv = [mapRange(x, lbr, ubr, lr, ur) for x in rrv]
+    ddv = [mapRange(x, lbd, ubd, lr, ur) for x in rrd]
+
+    g = sns.jointplot(x=random.choices(ddv, k=100000), y=random.choices(rrv, k=100000), s=10, alpha=.05, linewidth=0,
+                      marginal_kws=dict(bins=100, kde=True), height=figsize[0]);
+    plt.margins(x=1, y=1)
+    g.ax_joint.set_xlim([0, 0.2]);
+    g.ax_joint.set_ylim([0, 0.2]);
+    g.ax_joint.set_xlabel("Normalized $\delta_E$");
+    g.ax_joint.set_ylabel("Normalized Risk");
+    g.ax_joint.set(xticks=[0, 0.1, 0.2], yticks=[0, 0.1, 0.2]);
+    plt.suptitle('Data Correlation: ' + getCityName(city), fontsize=16, y=1.0);
+    filepath = 'images/' + city + '_dataviz.' + fmt
+    plt.savefig(filepath)
+    plt.gcf().subplots_adjust(bottom=0.1, left=0.1);
+    plt.show()
 
 
+def getDatasetFromCity(city):
+    directory = 'dataset_' + city + '_max5risk/'
+    filename = 'res'
+    file = directory + filename
+    onlyfiles = [f for f in listdir(directory) if isfile(join(directory, f)) and f[0] is 'r']
 
+    routes = []
+    risks = []
+    deltas = []
+    for file in onlyfiles:
+        localfile = directory + file
+        print('Opening file', localfile)
+        with open(directory + file, 'rb') as f:
+            res_pkl = pickle.load(f)
+
+        ro, ri, dd = zip(*res_pkl)
+        deltas.extend(dd)
+        routes.extend(ro)
+        risks.extend(ri)
+
+    return risks, deltas, routes
+
+
+def unPackDataset(city, G, risks, deltas, routes):
+    data_size = len(risks)
+
+    oxp = []
+    oyp = []
+    dxp = []
+    dyp = []
+    rrv = []
+    rrd = []
+
+    rp = []
+    rxp = []
+    ryp = []
+
+    d_threshold = 1000
+    deltas_threshold = np.percentile(deltas, 99)
+
+    depot_local = getDepotLocation(city)
+    depot_node = ox.get_nearest_nodes(G, [depot_local[1]], [depot_local[0]])
+
+    for i in range(data_size):
+        o = routes[i].orig
+        d = routes[i].dest
+        r = routes[i].optNode
+        dist = gd.distance((G.nodes[r]['y'], G.nodes[r]['x']), depot_local).m
+        if len(routes[i].nodes) > 0 and 0 < deltas[i] < deltas_threshold and dist > d_threshold:
+            oxp.append(G.nodes[o]['x'])
+            oyp.append(G.nodes[o]['y'])
+            dxp.append(G.nodes[d]['x'])
+            dyp.append(G.nodes[d]['y'])
+
+            rp.append(r)
+            rxp.append(G.nodes[r]['x'])
+            ryp.append(G.nodes[r]['y'])
+
+            rrv.append(risks[i])
+            rrd.append(deltas[i])
+
+    ur = 1.0
+    lr = -0.0
+
+    ubx = np.maximum(np.max(oxp), np.max(dxp))
+    lbx = np.minimum(np.min(oxp), np.min(dxp))
+    uby = np.maximum(np.max(oyp), np.max(dyp))
+    lby = np.minimum(np.min(oyp), np.min(dyp))
+    ubr = np.maximum(np.max(rrv), np.max(rrv))
+    lbr = np.minimum(np.min(rrv), np.min(rrv))
+    ubd = np.maximum(np.max(rrd), np.max(rrd))
+    lbd = np.minimum(np.min(rrd), np.min(rrd))
+    oxp = [mapRange(x, lbx, ubx, lr, ur) for x in oxp]
+    oyp = [mapRange(x, lby, uby, lr, ur) for x in oyp]
+    dxp = [mapRange(x, lbx, ubx, lr, ur) for x in dxp]
+    dyp = [mapRange(x, lby, uby, lr, ur) for x in dyp]
+    rrv = [mapRange(x, lbr, ubr, lr, ur) for x in rrv]
+    rxp = [mapRange(x, lbx, ubx, lr, ur) for x in rxp]
+    ryp = [mapRange(x, lby, uby, lr, ur) for x in ryp]
+    ddv = [mapRange(x, lbd, ubd, lr, ur) for x in rrd]
+    coord_bounds = {'ubx': ubx, 'lbx': lbx, 'uby': uby, 'lby': lby, 'ur': ur, 'lr': lr, 'lbd': lbd, 'ubd': ubd}
+
+    return oxp, oyp, dxp, dyp, rrv, rxp, ryp, ddv, coord_bounds, depot_local, depot_node
+
+
+def cityAndDataStats():
+    city_list = ['champaign', 'dtchicago', 'chicago', 'janeiro']
+
+    with open('city_stats.csv', 'w') as f:
+        writer = csv.writer(f)
+        writer.writerow(["city", "dataset_name", "n_nodes", "n_edges", "data_size"])
+        for city in city_list:
+            if city is city_list[0]:
+                city_name = 'Champaign-Urbana'
+            elif city is city_list[1]:
+                city_name = 'Downtown Chicago'
+            elif city is city_list[2]:
+                city_name = 'Chicago'
+            elif city is city_list[3]:
+                city_name = 'Rio de Janeiro'
+            G = getGraphWithSetting(city)
+            n_nodes = len(G.nodes)
+            n_edges = len(G.edges)
+            risks, deltas, routes = getDatasetFromCity(city)
+            data_size = len(risks)
+            fields = [city_name, city, n_nodes, n_edges, data_size]
+            writer.writerow(fields)
+
+def getCityName(city):
+    if city is 'champaign':
+        city_name = 'Champaign-Urbana'
+    elif city is 'dtchicago':
+        city_name = 'Downtown Chicago'
+    elif city is 'chicago':
+        city_name = 'Chicago'
+    elif city is 'janeiro':
+        city_name = 'Rio de Janeiro'
+    else:
+        city_name = None
+
+    return city_name
