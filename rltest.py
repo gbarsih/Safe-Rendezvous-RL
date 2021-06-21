@@ -38,7 +38,7 @@ im.reload(utils)
 
 figsize = utils.figsize
 dpi = utils.dpi
-os.environ["CUDA_VISIBLE_DEVICES"] = "4,5"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0,2,3"
 
 if torch.cuda.is_available():
     dev = "cuda:0"
@@ -47,7 +47,7 @@ else:
 
 device = torch.device(dev)
 
-city = 'dtchicago'  # chicago, dtchicago, champaign
+city = 'chicago'  # chicago, dtchicago, champaign
 G = utils.getGraphWithSetting(city)
 
 risks, deltas, routes = utils.getDatasetFromCity(city)
@@ -83,7 +83,14 @@ test_outputs = out_stack[total_data_entries - test_data:total_data_entries].to(d
 rxpt = rxp[total_data_entries - test_data:total_data_entries]
 rypt = ryp[total_data_entries - test_data:total_data_entries]
 
-class Model(nn.Module):
+n_l = 3
+n_n = 32
+d_p = 0.2
+lr = 0.001
+act = "Sigmoid"
+epochs = 30000 #TODO: test chicago with lower percentile in data threshold
+
+class ModelSELU(nn.Module):
 
     def __init__(self, input_size, output_size, layers, p=0.2):
         super().__init__()
@@ -105,10 +112,49 @@ class Model(nn.Module):
         x = self.layers(inputs)
         return x
 
-n_l = 3
-n_n = 32
-d_p = 0.1
-lr = 0.001
+class ModelReLU(nn.Module):
+
+    def __init__(self, input_size, output_size, layers, p=0.2):
+        super().__init__()
+
+        all_layers = []
+
+        for i in layers:
+            all_layers.append(nn.Linear(input_size, i))
+            all_layers.append(nn.ReLU())  # Leaky Doing well
+            all_layers.append(nn.BatchNorm1d(i))
+            all_layers.append(nn.Dropout(p))
+            input_size = i
+
+        all_layers.append(nn.Linear(layers[-1], output_size))
+
+        self.layers = nn.Sequential(*all_layers)
+
+    def forward(self, inputs):
+        x = self.layers(inputs)
+        return x
+
+class ModelSigmoid(nn.Module):
+
+    def __init__(self, input_size, output_size, layers, p=0.2):
+        super().__init__()
+
+        all_layers = []
+
+        for i in layers:
+            all_layers.append(nn.Linear(input_size, i))
+            all_layers.append(nn.Sigmoid())  # Leaky Doing well
+            all_layers.append(nn.BatchNorm1d(i))
+            all_layers.append(nn.Dropout(p))
+            input_size = i
+
+        all_layers.append(nn.Linear(layers[-1], output_size))
+
+        self.layers = nn.Sequential(*all_layers)
+
+    def forward(self, inputs):
+        x = self.layers(inputs)
+        return x
 
 layers = []
 for i in range(n_l):
@@ -116,10 +162,14 @@ for i in range(n_l):
 
 # layers.append(32)
 
-model = Model(4, 1, layers, p=d_p)
+if act == 'SELU':
+    model = ModelSELU(4, 1, layers, p=d_p)
+elif act == 'ReLU':
+    model = ModelReLU(4, 1, layers, p=d_p)
+elif act == 'Sigmoid':
+    model = ModelSigmoid(4, 1, layers, p=d_p)
 model = nn.DataParallel(model)
 model.to(device)
-epochs = 10000
 num_stints = 1
 aggregated_losses = []
 
@@ -234,7 +284,7 @@ ax224 = fig.add_subplot(224)
 c = None
 rp = 0.75
 rm = 0.25
-vmin = 0.0
+vmin = None
 vmax = 0.1
 numticks = 1000
 depot_x, depot_y = utils.LatLonToUnit(depot_local[0], depot_local[1], coord_bounds)
@@ -394,9 +444,9 @@ print('Max Err', np.max(np.abs(perf)))
 
 import csv
 
-fields = [city, n_l, n_n, lr, d_p, epochs, perf_mse, np.mean(perf_mae)]
+fields = [city, n_l, n_n, act, d_p, epochs, perf_mse, np.mean(perf_mae)]
 print(fields)
 with open(r'log_hyper.csv', 'a') as f:
     writer = csv.writer(f)
     writer.writerow(fields)
-    # writer.writerow(["city", "n_layers", "n_neurons", "learn_rate", "dropout", "epochs", "mse", "mae"])
+    # writer.writerow(["city", "n_layers", "n_neurons", "activation", "dropout", "epochs", "mse", "mae"])
