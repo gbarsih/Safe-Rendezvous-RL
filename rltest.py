@@ -84,11 +84,11 @@ rxpt = rxp[total_data_entries - test_data:total_data_entries]
 rypt = ryp[total_data_entries - test_data:total_data_entries]
 
 n_l = 3
-n_n = 32
+n_n = 512
 d_p = 0.2
 lr = 0.001
-act = "Sigmoid"
-epochs = 30000 #TODO: test chicago with lower percentile in data threshold
+act = "GELU" #dtchicago soa: 3-32-0.2-GELU
+epochs = 30000 #TODO: test these settings on Chicago.
 
 class ModelSELU(nn.Module):
 
@@ -100,6 +100,28 @@ class ModelSELU(nn.Module):
         for i in layers:
             all_layers.append(nn.Linear(input_size, i))
             all_layers.append(nn.SELU())  # Leaky Doing well
+            all_layers.append(nn.BatchNorm1d(i))
+            all_layers.append(nn.Dropout(p))
+            input_size = i
+
+        all_layers.append(nn.Linear(layers[-1], output_size))
+
+        self.layers = nn.Sequential(*all_layers)
+
+    def forward(self, inputs):
+        x = self.layers(inputs)
+        return x
+
+class ModelGELU(nn.Module):
+
+    def __init__(self, input_size, output_size, layers, p=0.2):
+        super().__init__()
+
+        all_layers = []
+
+        for i in layers:
+            all_layers.append(nn.Linear(input_size, i))
+            all_layers.append(nn.GELU())  # Leaky Doing well
             all_layers.append(nn.BatchNorm1d(i))
             all_layers.append(nn.Dropout(p))
             input_size = i
@@ -168,6 +190,9 @@ elif act == 'ReLU':
     model = ModelReLU(4, 1, layers, p=d_p)
 elif act == 'Sigmoid':
     model = ModelSigmoid(4, 1, layers, p=d_p)
+elif act == 'GELU':
+    model = ModelGELU(4, 1, layers, p=d_p)
+
 model = nn.DataParallel(model)
 model.to(device)
 num_stints = 1
@@ -332,8 +357,6 @@ Gc = utils.getGraphWithSetting(city)
 nodes, edges = ox.graph_to_gdfs(G, nodes=True, edges=True)
 fig = plt.figure(figsize=utils.figsize, dpi=utils.dpi)
 suptitle_font = {'fontsize': 14, 'fontweight': 'normal', 'y': 0.98}
-fig.suptitle(utils.getCityName(city) + ', $n_l$: {}, $n_n$: {}, $p_d$: {}, MAE: {:5.4}'.format(n_l, n_n, d_p, np.mean(perf_mae)),
-             **suptitle_font)
 ax221 = fig.add_subplot(221)
 ax222 = fig.add_subplot(222)
 ax223 = fig.add_subplot(223)
@@ -388,6 +411,12 @@ ax224 = utils.scatterGraph(depot_node, G, ax224, color=utils.depot_color)
 lon_d, lat_d = utils.UnitToLatLon(rp, rm, coord_bounds)
 dest_node = ox.get_nearest_nodes(G, [lon_d], [lat_d])
 ax224 = utils.scatterGraph(dest_node, G, ax224, color=utils.dest_color)
+
+filepath = 'images/' + city + 'map_heat_untitled.png'
+plt.savefig(filepath)
+
+fig.suptitle(utils.getCityName(city) + ', $n_l$: {}, $n_n$: {}, $p_d$: {}, MAE: {:5.4}'.format(n_l, n_n, d_p, np.mean(perf_mae)),
+             **suptitle_font)
 
 filepath = 'images/' + city + 'map_heat.png'
 plt.savefig(filepath)

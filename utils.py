@@ -964,13 +964,28 @@ def plotCityMapForSlides(city, fmt='png'):
         node_size = 0
         edge_lw_local = edge_lw
     else:
-        node_size = 40
-        edge_lw_local = 2
+        node_size = 10
+        edge_lw_local = 1
 
     ox.plot_graph(G, node_size=node_size, node_color="#a3a3a3", edge_color="#a3a3a3", edge_linewidth=edge_lw_local,
-                  bgcolor="#ffffff", show=False, dpi=dpi * 2, figsize=(20, 20), save=True, filepath=filepath);
+                  bgcolor="#ffffff", show=False, dpi=dpi * 1, figsize=(10, 10), save=True, filepath=filepath);
     plt.show()
 
+def plotPlaceMapForSlides(place, name=None, ns=10, lw=0.5, fmt='png'):
+    G = ox.graph_from_place(place, network_type="drive", simplify=True)
+    G = ox.utils_graph.get_largest_component(G, strongly=True)
+
+    if name is None:
+        filepath = 'images/' + place[0:3] + '_map.' + fmt
+    else:
+        filepath = 'images/' + name + '_map.' + fmt
+
+    node_size = ns
+    edge_lw_local = lw
+
+    ox.plot_graph(G, node_size=node_size, node_color="#a3a3a3", edge_color="#a3a3a3", edge_linewidth=edge_lw_local,
+                  bgcolor="#ffffff", show=False, dpi=dpi * 1, figsize=(10, 10), save=True, filepath=filepath);
+    plt.show()
 
 def plotCityMapWithFeatures(city, fmt='png'):
     G = getGraphWithSetting(city)
@@ -1362,7 +1377,7 @@ def LatLonToUnit(lat, lon, coord_bounds):
     return x, y
 
 
-def plotDataCorrelation(city, fmt='png'):
+def plotDataCorrelation(city, lim=1.0, fmt='png'):
     G = getGraphWithSetting(city)
 
     risks, deltas, routes = getDatasetFromCity(city)
@@ -1396,18 +1411,18 @@ def plotDataCorrelation(city, fmt='png'):
     rrv = [mapRange(x, lbr, ubr, lr, ur) for x in rrv]
     ddv = [mapRange(x, lbd, ubd, lr, ur) for x in rrd]
 
-    g = sns.jointplot(x=random.choices(ddv, k=100000), y=random.choices(rrv, k=100000), s=10, alpha=.05, linewidth=0,
+    g = sns.jointplot(x=random.choices(ddv, k=100000), y=random.choices(rrv, k=100000), s=10, alpha=.5, linewidth=0,
                       marginal_kws=dict(bins=100, kde=True), height=figsize[0]);
     plt.margins(x=1, y=1)
-    g.ax_joint.set_xlim([0, 0.2]);
-    g.ax_joint.set_ylim([0, 0.2]);
+    g.ax_joint.set_xlim([0, lim]);
+    g.ax_joint.set_ylim([0, lim]);
     g.ax_joint.set_xlabel("Normalized $\delta_E$");
-    g.ax_joint.set_ylabel("Normalized Risk");
-    g.ax_joint.set(xticks=[0, 0.1, 0.2], yticks=[0, 0.1, 0.2]);
-    plt.suptitle('Data Correlation: ' + getCityName(city), fontsize=16, y=1.0);
-    filepath = 'images/' + city + '_dataviz.' + fmt
-    plt.savefig(filepath)
+    g.ax_joint.set_ylabel("Normalized $\mathrm{CVaR}_{1-\gamma}(\mathcal{E})$");
+    g.ax_joint.set(xticks=[0, 0.1, 0.2, lim], yticks=[0, 0.1, 0.2, lim]);
+    plt.suptitle('Data Spread: ' + getCityName(city), fontsize=16, y=0.98);
     plt.gcf().subplots_adjust(bottom=0.1, left=0.1);
+    filepath = 'images/' + city + '_dataviz.' + fmt
+    plt.savefig(filepath, dpi=dpi)
     plt.show()
 
 
