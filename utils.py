@@ -1547,3 +1547,32 @@ def getCityName(city):
         city_name = None
 
     return city_name
+
+def findOptSamp(reals, predictions, v1, v2, pt=60):
+    r = np.arange(v1,v2,0.0005)
+    vals = []
+    for e in r:
+        diffs = [np.abs(np.abs(reals[i] - predictions[i]) - e) for i in range(len(reals))]
+        mx = np.argmin(diffs)
+        acc = 0
+        tot = 0
+        diffs = []
+        rths = np.percentile(reals, pt)
+        for i in range(len(reals)):
+            if reals[i] < rths:
+                tot += 1
+                if (reals[mx] >= reals[i] and predictions[mx] >= predictions[i]) or (
+                        reals[mx] < reals[i] and predictions[mx] < predictions[i]):
+                    acc += 1
+                else:
+                    d1 = np.abs(predictions[i] - predictions[mx]) / predictions[i]
+                    d2 = np.abs(predictions[i] - predictions[mx]) / predictions[mx]
+                    diffs.append(np.minimum(d1, d2))
+
+        pct_err = acc / tot
+        # print(pct_err)
+        # print(np.mean(diffs))
+        vals.append(pct_err)
+
+    idx = np.argmax(vals)
+    return r[idx], vals[idx]

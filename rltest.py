@@ -10,7 +10,8 @@ import matplotlib.pyplot as plt
 # import matplotlib as mpl
 import geopy.distance as gd
 # import re
-import seaborn as sns;
+import seaborn as sns
+import random
 
 # sns.set_theme()
 # sns.set_style("whitegrid")
@@ -87,8 +88,8 @@ n_l = 3
 n_n = 128
 d_p = 0.2
 lr = 0.001
-act = "ReLU" #dtchicago soa: 3-32-0.2-GELU
-epochs = 10000 #TODO: test these settings on Chicago.
+act = "SELU" #dtchicago soa: 3-32-0.2-GELU
+epochs = 1000
 
 class ModelSELU(nn.Module):
 
@@ -255,9 +256,56 @@ with torch.no_grad():
 predictions = predictions.cpu().numpy()
 reals = test_outputs.cpu().numpy()
 
+bias, optv = utils.findOptSamp(reals,predictions,0.001,0.01,99.99)
+
+diffs = [np.abs(np.abs(reals[i] - predictions[i])-bias)  for i in range(len(reals))]
+mx = np.argmin(diffs)
+# mx = 0
+
 pcts = []
+acc = 0
+tot = 0
+diffs = []
+rths = np.percentile(reals, 99.99)
 for i in range(len(reals)):
-    pcts.append(np.abs(reals[i] - predictions[i]) / predictions[i])
+    if reals[i] < rths:
+        pcts.append(np.abs(reals[i] - predictions[i]) / predictions[i])
+        tot += 1
+        if (reals[mx]>=reals[i] and predictions[mx]>=predictions[i]) or (reals[mx]<reals[i] and predictions[mx]<predictions[i]):
+            acc += 1
+        else:
+            d1 = np.abs(predictions[i] - predictions[mx]) / predictions[i]
+            d2 = np.abs(predictions[i] - predictions[mx]) / predictions[mx]
+            diffs.append(np.minimum(d1, d2))
+
+pcts = np.stack(pcts)
+print(np.mean(diffs))
+pct_err = acc/tot
+print(pct_err)
+
+acc = 0
+tot = 0
+cases = 10000
+diffs_ran = []
+rths = np.percentile(reals, 99.99)
+for i in range(cases):
+    i1 = random.randint(0, len(reals) - 1)
+    i2 = random.randint(0, len(reals) - 1)
+    if reals[i1] < rths and reals[i2] < rths:
+        tot += 1
+        if (reals[i1] > reals[i2] and predictions[i1] > predictions[i2]) or (
+                reals[i1] < reals[i2] and predictions[i1] < predictions[i2]):
+            acc += 1
+        else:
+            d1 = np.abs(predictions[i1]-predictions[i2])/predictions[i1]
+            d2 = np.abs(predictions[i1]-predictions[i2])/predictions[i2]
+            diffs_ran.append(np.minimum(d1,d2))
+
+perf_ran = acc/tot
+print(np.mean(diffs_ran))
+print(perf_ran)
+pct_err = np.maximum(perf_ran, pct_err)
+mean_rank_err = np.minimum(np.mean(diffs_ran), np.mean(diffs))
 
 test_size = len(reals)
 
@@ -304,7 +352,7 @@ perf_mse = np.mean(perf_mse)
 im.reload(utils)
 fig = plt.figure(figsize=utils.figsize, dpi=utils.dpi)
 suptitle_font = {'fontsize': 14, 'fontweight': 'normal', 'y': 0.98}
-fig.suptitle(utils.getCityName(city) + ', $n_l$: {}, $n_n$: {}, $p_d$: {}, MAE: {:5.4}'.format(n_l, n_n, d_p, np.mean(perf_mae)),
+fig.suptitle(utils.getCityName(city) + ', $n_l$: {}, $n_n$: {}, $p_d$: {}, Perf: {:4.2f}%'.format(n_l, n_n, d_p, pct_err*100),
              **suptitle_font)
 ax221 = fig.add_subplot(221)
 ax222 = fig.add_subplot(222)
@@ -315,7 +363,7 @@ rp = 0.75
 rm = 0.25
 vmin = None
 vmax = 0.1
-numticks = 1000
+numticks = 100
 depot_x, depot_y = utils.LatLonToUnit(depot_local[0], depot_local[1], coord_bounds)
 predictions = utils.TwoDPredictions(model, rm, rp, device, numticks)
 sns.heatmap(predictions, square=True, xticklabels=False, yticklabels=False, ax=ax221, cbar=True,
@@ -419,7 +467,7 @@ ax224 = utils.scatterGraph(dest_node, G, ax224, color=utils.dest_color)
 filepath = 'images/' + city + 'map_heat_untitled.png'
 plt.savefig(filepath)
 
-fig.suptitle(utils.getCityName(city) + ', $n_l$: {}, $n_n$: {}, $p_d$: {}, MAE: {:5.4}'.format(n_l, n_n, d_p, np.mean(perf_mae)),
+fig.suptitle(utils.getCityName(city) + ', $n_l$: {}, $n_n$: {}, $p_d$: {}, Perf: {:4.2f}%'.format(n_l, n_n, d_p, pct_err*100),
              **suptitle_font)
 
 filepath = 'images/' + city + 'map_heat.png'
@@ -475,11 +523,14 @@ print('MSE', perf_mse)
 print('MAE', np.mean(perf_mae))
 print('Max Err', np.max(np.abs(perf)))
 print('Pct Err', np.mean(pcts))
+print('Pct Err adjusted', pct_err)
+print('Rank Err', mean_rank_err)
 
 import csv
 
 fields = [city, n_l, n_n, act, d_p, epochs, perf_mse, np.mean(perf_mae)]
 print(fields)
+
 with open(r'log_hyper.csv', 'a') as f:
     writer = csv.writer(f)
     writer.writerow(fields)

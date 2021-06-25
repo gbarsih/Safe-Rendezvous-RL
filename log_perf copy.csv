@@ -77,8 +77,3 @@ Downtown Chicago,Sigmoid,2,32,0.2,2.3189e-02,7.8671e-02,1.9688e-05
 Downtown Chicago,SELU,2,32,0.8,2.2169e-02,7.5433e-02,8.8199e-06
 Downtown Chicago,ReLU,2,32,0.8,2.2123e-02,7.6422e-02,4.5100e-05
 Downtown Chicago,Sigmoid,2,32,0.8,2.2288e-02,7.5259e-02,9.2205e-06
-Downtown Chicago,SELU,2,128,0.2,2.4121e-02,7.9500e-02,6.6378e-05
-Downtown Chicago,ReLU,2,128,0.2,2.3907e-02,7.8278e-02,1.2056e-04
-Downtown Chicago,Sigmoid,2,128,0.2,2.3479e-02,8.0774e-02,4.5821e-05
-Downtown Chicago,SELU,2,128,0.8,2.1672e-02,7.5745e-02,2.6791e-05
-Downtown Chicago,ReLU,2,128,0.8,2.1971e-02,7.7919e-02,1.1211e-04
