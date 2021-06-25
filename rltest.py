@@ -47,7 +47,7 @@ else:
 
 device = torch.device(dev)
 
-city = 'chicago'  # chicago, dtchicago, champaign
+city = 'champaign'  # chicago, dtchicago, champaign
 G = utils.getGraphWithSetting(city)
 
 risks, deltas, routes = utils.getDatasetFromCity(city)
@@ -84,11 +84,11 @@ rxpt = rxp[total_data_entries - test_data:total_data_entries]
 rypt = ryp[total_data_entries - test_data:total_data_entries]
 
 n_l = 3
-n_n = 512
+n_n = 128
 d_p = 0.2
 lr = 0.001
-act = "GELU" #dtchicago soa: 3-32-0.2-GELU
-epochs = 30000 #TODO: test these settings on Chicago.
+act = "ReLU" #dtchicago soa: 3-32-0.2-GELU
+epochs = 10000 #TODO: test these settings on Chicago.
 
 class ModelSELU(nn.Module):
 
@@ -254,6 +254,10 @@ with torch.no_grad():
 
 predictions = predictions.cpu().numpy()
 reals = test_outputs.cpu().numpy()
+
+pcts = []
+for i in range(len(reals)):
+    pcts.append(np.abs(reals[i] - predictions[i]) / predictions[i])
 
 test_size = len(reals)
 
@@ -470,6 +474,7 @@ print('Median', np.median(perf))
 print('MSE', perf_mse)
 print('MAE', np.mean(perf_mae))
 print('Max Err', np.max(np.abs(perf)))
+print('Pct Err', np.mean(pcts))
 
 import csv
 
