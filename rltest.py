@@ -48,7 +48,7 @@ else:
 
 device = torch.device(dev)
 
-city = 'champaign'  # chicago, dtchicago, champaign
+city = 'chicago'  # chicago, dtchicago, champaign
 G = utils.getGraphWithSetting(city)
 
 risks, deltas, routes = utils.getDatasetFromCity(city)
@@ -85,11 +85,11 @@ rxpt = rxp[total_data_entries - test_data:total_data_entries]
 rypt = ryp[total_data_entries - test_data:total_data_entries]
 
 n_l = 3
-n_n = 128
-d_p = 0.2
+n_n = 512
+d_p = 0.6
 lr = 0.001
 act = "SELU" #dtchicago soa: 3-32-0.2-GELU
-epochs = 1000
+epochs = 30000
 
 class ModelSELU(nn.Module):
 
@@ -256,7 +256,7 @@ with torch.no_grad():
 predictions = predictions.cpu().numpy()
 reals = test_outputs.cpu().numpy()
 
-bias, optv = utils.findOptSamp(reals,predictions,0.001,0.01,99.99)
+bias, optv = utils.findOptSamp(reals,predictions,np.mean(reals)-0.02,np.mean(reals)+0.02,99.99)
 
 diffs = [np.abs(np.abs(reals[i] - predictions[i])-bias)  for i in range(len(reals))]
 mx = np.argmin(diffs)
@@ -274,8 +274,8 @@ for i in range(len(reals)):
         if (reals[mx]>=reals[i] and predictions[mx]>=predictions[i]) or (reals[mx]<reals[i] and predictions[mx]<predictions[i]):
             acc += 1
         else:
-            d1 = np.abs(predictions[i] - predictions[mx]) / predictions[i]
-            d2 = np.abs(predictions[i] - predictions[mx]) / predictions[mx]
+            d1 = np.abs((predictions[i] - predictions[mx]) / predictions[i])
+            d2 = np.abs((predictions[i] - predictions[mx]) / predictions[mx])
             diffs.append(np.minimum(d1, d2))
 
 pcts = np.stack(pcts)
@@ -297,8 +297,8 @@ for i in range(cases):
                 reals[i1] < reals[i2] and predictions[i1] < predictions[i2]):
             acc += 1
         else:
-            d1 = np.abs(predictions[i1]-predictions[i2])/predictions[i1]
-            d2 = np.abs(predictions[i1]-predictions[i2])/predictions[i2]
+            d1 = np.abs((predictions[i1]-predictions[i2])/predictions[i1])
+            d2 = np.abs((predictions[i1]-predictions[i2])/predictions[i2])
             diffs_ran.append(np.minimum(d1,d2))
 
 perf_ran = acc/tot
@@ -475,7 +475,49 @@ plt.savefig(filepath)
 
 plt.show()
 
-# #plot the isochrones
+# TODO: plot big map route in low risk region vs high risk region.
+#plot big city map;
+fig = plt.figure(figsize=(20,20), dpi=50)
+suptitle_font = {'fontsize': 14, 'fontweight': 'normal', 'y': 0.98}
+
+ns = utils.ns
+
+G = Gc
+predictions, node_list = utils.InferNodeRiskMultiple(G, nodes.index, rp, rm, model, device, coord_bounds)
+nx.set_node_attributes(G, {nodes.index[i]: predictions[i][0] for i in range(len(predictions))}, name='r')
+nc = ox.plot.get_node_colors_by_attr(G, attr='r', cmap=sns.color_palette("rocket", as_cmap=True))
+fig, ax = ox.plot_graph(G, node_color=nc, node_size=ns, edge_linewidth=utils.edge_lw, figsize=(20,12),
+              bgcolor='black', show=False, close=False)
+ax = utils.scatterGraph(depot_node, G, ax, color=utils.depot_color)
+lon_d, lat_d = utils.UnitToLatLon(rp, rm, coord_bounds)
+dest_node = ox.get_nearest_nodes(G, [lon_d], [lat_d])
+ax = utils.scatterGraph(dest_node, G, ax, color=utils.dest_color)
+
+filepath = 'images/' + city + 'map_heat_big.png'
+plt.savefig(filepath)
+
+plt.show()
+
+
+fig = plt.figure(figsize=(20,20), dpi=50)
+
+G = Gc
+predictions, node_list = utils.InferNodeRiskMultiple(G, nodes.index, rm, rp, model, device, coord_bounds)
+nx.set_node_attributes(G, {nodes.index[i]: predictions[i][0] for i in range(len(predictions))}, name='r')
+nc = ox.plot.get_node_colors_by_attr(G, attr='r', cmap=sns.color_palette("rocket", as_cmap=True))
+fig, ax = ox.plot_graph(G, node_color=nc, node_size=ns, edge_linewidth=utils.edge_lw, figsize=(20,12),
+              bgcolor='black', show=False, close=False)
+ax = utils.scatterGraph(depot_node, G, ax, color=utils.depot_color)
+lon_d, lat_d = utils.UnitToLatLon(rm, rp, coord_bounds)
+dest_node = ox.get_nearest_nodes(G, [lon_d], [lat_d])
+ax = utils.scatterGraph(dest_node, G, ax, color=utils.dest_color)
+
+filepath = 'images/' + city + 'map_heat_big_2.png'
+plt.savefig(filepath)
+
+plt.show()
+
+#plot the isochrones
 # network_type = 'drive'
 # trip_times = [5, 10, 15, 20] #in minutes
 # travel_speed = 15 #driving speed in km/hour
@@ -498,7 +540,7 @@ plt.show()
 #     bounding_poly = gpd.GeoSeries(node_points).unary_union.convex_hull
 #     isochrone_polys.append(bounding_poly)
 
-# #plot isochrone and heatmap side by side
+#plot isochrone and heatmap side by side
 
 # im.reload(utils)
 # fig = plt.figure(figsize=figsize, dpi=100)

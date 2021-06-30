@@ -1,23 +1,23 @@
-import numpy as np
 import multiprocessing as mp
 import networkx as nx
-import matplotlib.pyplot as plt
-import math
 import geopy.distance as gd
 import pandas as pd
 import random
 from multiprocessing import Pool as ThreadPool
 import itertools
-import statistics
 import time
 import datetime
-import torch
-from pprint import pprint
 import seaborn as sns
 import pickle
-import os
 from os import listdir
 from os.path import isfile, join
+import torch
+import torch.nn.functional as F
+import numpy as np
+import matplotlib.pylab as plt
+import sys
+sys.path.append("..")
+from matplotlib import pyplot as plt
 
 import csv
 
@@ -1463,7 +1463,7 @@ def unPackDataset(city, G, risks, deltas, routes):
     rxp = []
     ryp = []
 
-    d_threshold = 1000
+    d_threshold = 100
     deltas_threshold = np.percentile(deltas, 99)
 
     depot_local = getDepotLocation(city)
@@ -1576,3 +1576,22 @@ def findOptSamp(reals, predictions, v1, v2, pt=60):
 
     idx = np.argmax(vals)
     return r[idx], vals[idx]
+
+def plotActivation(act='SELU'):
+    x = torch.arange(-6.0, 6.0, 0.1, requires_grad=True)
+
+    if act == 'SELU':
+        y = F.selu(x)
+    elif act == 'ReLU':
+        y = x.relu()
+    elif act == 'Sigmoid':
+        y = x.sigmoid()
+    elif act == 'GELU':
+        y = F.gelu(x)
+
+    fig = plt.figure(figsize=figsize, dpi=dpi)
+    plt.plot(x.detach().numpy(), y.detach().numpy(), label=act, linewidth=1.5)
+    plt.style.use("seaborn")
+    filepath = 'images/' + act + '.png'
+    plt.savefig(filepath)
+    plt.show()
